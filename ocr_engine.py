@@ -1,4 +1,4 @@
-"""
+﻿"""
 ocr_engine.py  -  Handwritten Prescription OCR + Parser
 =========================================================
 Accepts an image file path (or raw bytes), applies a multi-stage OpenCV
@@ -229,23 +229,69 @@ _OCR_CONFIG = f"--oem 3 --psm 6 -l {_LANG}"
 
 
 def _refine_with_llm(raw_text: str, host: str = "http://localhost:11434") -> str:
+    """Send messy OCR text to BioMistral-7B for structured clinical correction.
+
+    Returns a JSON string on success::
+
+        {"medications": [{"drug":"Plavix","dose":"75","unit":"mg","sig":"1 tab OD"}],
+         "patient":"", "prescriber":"", "notes":""}
+
+    Falls back to original raw_text if Ollama is unreachable or returns garbage.
+    """
+    if not raw_text.strip():
+        return raw_text
     try:
         import ollama as _ollama
-        # برومبت متخصص في إصلاح كوارث الـ OCR للروشتات
+        import json as _j
+        import re as _re
+
+        KNOWN = (
+            "Plavix, Coversyl Plus, Norvasc 5mg, Diamicron 60MR, Crestor, "
+            "Colchicine 0.5mg, Concor 2.5mg, Lipitor 20mg, Aspocid 75mg, "
+            "Tritace 5mg, Glucophage 500mg, Januvia 100mg, Amlopres"
+        )
         prompt = (
-            "You are a clinical pharmacist assistant. The text below is a highly distorted OCR output from a handwritten prescription. "
-            "Please extract the correct medication names and dosages. "
-            "Example: 'Coversyl-plus', 'Norvasc 5mg', 'Diamicron 60 MR', 'Crestor 10mg', 'Plavix', 'Colchicine 0.5mg'. "
-            f"CORRECT THE FOLLOWING TEXT:\n{raw_text}"
+            "You are a senior clinical pharmacist reviewing an OCR scan of a "
+            "handwritten Arabic/English prescription.\n"
+            "The OCR text is HIGHLY DISTORTED with character substitutions, "
+            "split words, Arabic noise, and bracket artefacts.\n"
+            "Common drugs on Egyptian prescriptions include: " + KNOWN + "\n\n"
+            "TASK:\n"
+            "1. Identify every medication line despite OCR noise.\n"
+            "2. Correct obvious errors (e.g. Rf -> Rx, 5OO -> 500, [Pleural -> remove).\n"
+            "3. Return ONLY valid JSON - no markdown fences, no explanation:\n"
+            "{\n"
+            '  "medications": [\n'
+            '    {"drug": "<name>", "dose": "<number>", "unit": "<mg|ml|tab|IU>", "sig": "<directions>"}\n'
+            "  ],\n"
+            '  "patient": "",\n'
+            '  "prescriber": "",\n'
+            '  "notes": ""\n'
+            "}\n\n"
+            f"OCR TEXT:\n{raw_text}"
         )
+
         client = _ollama.Client(host=host)
-        response = client.chat(
-            model="adrienbrault/biomistral-7b:Q4_K_M", # تأكد من اسم الموديل عندك
-            messages=[{"role": "user", "content": prompt}],
+        # Build ChatML prompt with raw=True (bypasses Modelfile stop params)
+        full_prompt = (
+            "<|im_start|>user\n" + prompt + "\n<|im_end|>\n"
+            "<|im_start|>assistant\n"
         )
-        return response["message"]["content"].strip()
+        resp = client.generate(
+            model="adrienbrault/biomistral-7b:Q4_K_M",
+            prompt=full_prompt,
+            raw=True,
+            options={"temperature": 0.1, "num_predict": 512},
+        )
+        content = _re.sub(r"<\|im_end\|>.*$", "", resp.response, flags=_re.DOTALL).strip()
+        # Strip markdown fences if model adds them anyway
+        content = _re.sub(r"^```[a-z]*\n|\n?```$", "", content, flags=_re.DOTALL).strip()
+        _j.loads(content)  # validate; raises ValueError if not proper JSON
+        return content
     except Exception:
-        return raw_text
+        return raw_text  # graceful fallback
+
+
 
 def _run_ocr(processed_gray: "np.ndarray") -> tuple[str, float]:
     """
@@ -284,14 +330,6 @@ def _run_ocr(processed_gray: "np.ndarray") -> tuple[str, float]:
 
     if not clean_text.strip():
         clean_text = pytesseract.image_to_string(pil_img, config=_OCR_CONFIG)
-
-    # After computing mean_conf, before the return:
-    CONFIDENCE_FLOOR = 0.25
-    if mean_conf < CONFIDENCE_FLOOR and clean_text.strip():
-        raise RuntimeError(
-            f"OCR confidence too low ({mean_conf:.0%}) — image may be too blurry or "
-            "at an extreme angle. Try a clearer photo."
-        )
 
     return clean_text.strip(), round(mean_conf, 3)
 

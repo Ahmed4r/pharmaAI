@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import time
 from datetime import datetime
 
@@ -212,8 +212,14 @@ def process_prescription_ocr(image_bytes: bytes) -> dict:
 
 
 def query_ollama_llm(user_message: str, chat_history: list) -> str:
-    """Send prompt + history to local BioMistral via Ollama."""
+    """Send prompt + history to local BioMistral via Ollama.
+
+    Uses generate(raw=True) with a manually-built ChatML prompt.
+    The model Modelfile uses generate-style template which makes the chat()
+    API return empty strings; raw=True bypasses the Modelfile stop params.
+    """
     import ollama as _ollama
+    import re as _re
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
     _SYS   = st.session_state.get(
@@ -224,11 +230,22 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     )
     try:
         client = _ollama.Client(host=_HOST)
-        messages = [{"role": "system", "content": _SYS}]
-        messages += [{"role": m["role"], "content": m["content"]} for m in chat_history]
-        messages.append({"role": "user", "content": user_message})
-        resp = client.chat(model=_MODEL, messages=messages)
-        return resp["message"]["content"]
+        # Build full ChatML conversation string
+        parts = [f"<|im_start|>system\n{_SYS}\n<|im_end|>"]
+        for m in chat_history:
+            parts.append(f"<|im_start|>{m['role']}\n{m['content']}\n<|im_end|>")
+        parts.append(f"<|im_start|>user\n{user_message}\n<|im_end|>")
+        parts.append("<|im_start|>assistant\n")
+        full_prompt = "\n".join(parts)
+        resp = client.generate(
+            model=_MODEL,
+            prompt=full_prompt,
+            raw=True,
+            options={"num_predict": 1024, "temperature": 0.7},
+        )
+        # Strip any trailing <|im_end|> the model may emit
+        answer = _re.sub(r"<\|im_end\|>.*$", "", resp.response, flags=_re.DOTALL).strip()
+        return answer
     except Exception as exc:
         return (
             f"**BioMistral offline** - could not reach Ollama at `{_HOST}`\n\n"
@@ -238,39 +255,65 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
 
 
 def check_drug_interactions(drug_list: list) -> list:
-    """
-    Placeholder  queries drug interaction database.
+    """Query RxNav REST API for real drug-drug interactions.
 
-    Production implementation:
-      - DrugBank API  /drug-interactions endpoint
-      - RxNorm  /rxcui/{id}/related  endpoint
-      - OpenFDA  /drug/label  for interaction sections
+    Free, no API key required. Falls back to empty list on any network error.
     """
-    time.sleep(1.0)
+    import requests as _req
+
     if len(drug_list) < 2:
         return []
-    return [
-        {
-            "drug_a":      "Ibuprofen 400mg",
-            "drug_b":      "Omeprazole 20mg",
-            "severity":    "minor",
-            "description": (
-                "Co-administration is clinically appropriate. Omeprazole is commonly "
-                "prescribed prophylactically to protect gastric mucosa from NSAID-induced damage. "
-                "No pharmacokinetic interaction of clinical significance."
-            ),
-        },
-        {
-            "drug_a":      "Amoxicillin 500mg",
-            "drug_b":      "Ibuprofen 400mg",
-            "severity":    "minor",
-            "description": (
-                "NSAIDs may reduce renal prostaglandin production, slightly altering "
-                "antibiotic renal clearance. No dose adjustment is typically required."
-            ),
-        },
-    ]
 
+    # Step 1: resolve each drug name to an RxCUI
+    cuis = []
+    for drug in drug_list:
+        name = drug.split()[0] if drug else ""
+        try:
+            r = _req.get(
+                "https://rxnav.nlm.nih.gov/REST/rxcui.json",
+                params={"name": name, "search": "2"},
+                timeout=6,
+            )
+            rxnorm_ids = r.json().get("idGroup", {}).get("rxnormId", [])
+            if rxnorm_ids:
+                cuis.append(rxnorm_ids[0])
+        except Exception:
+            continue
+
+    if len(cuis) < 2:
+        return []
+
+    # Step 2: query interaction list for all resolved CUIs
+    results = []
+    try:
+        r = _req.get(
+            "https://rxnav.nlm.nih.gov/REST/interaction/list.json",
+            params={"rxcuis": " ".join(cuis)},
+            timeout=10,
+        )
+        groups = r.json().get("fullInteractionTypeGroup", [])
+        SEV_MAP = {
+            "high": "major", "critical": "major",
+            "moderate": "moderate",
+            "low": "minor", "minor": "minor",
+        }
+        for group in groups:
+            for itype in group.get("fullInteractionType", []):
+                for pair in itype.get("interactionPair", []):
+                    concepts = pair.get("interactionConcept", [])
+                    if len(concepts) < 2:
+                        continue
+                    raw_sev = (pair.get("severity") or "unknown").strip().lower()
+                    results.append({
+                        "drug_a":      concepts[0]["minConceptItem"]["name"],
+                        "drug_b":      concepts[1]["minConceptItem"]["name"],
+                        "severity":    SEV_MAP.get(raw_sev, raw_sev),
+                        "description": pair.get("description", "No details available."),
+                    })
+    except Exception:
+        pass
+
+    return results
 
 def lookup_drug_info(drug_name: str) -> dict:
     """
@@ -411,15 +454,21 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    _NAV_OPTIONS = [
+        u"🏠  Dashboard",
+        u"📋  Prescription Scanner",
+        u"💬  Drug Interaction Chat",
+        u"🔍  Drug Lookup",
+        u"⚙️  Settings",
+    ]
+    _NAV_LABELS = [o.split("  ", 1)[-1].strip() for o in _NAV_OPTIONS]
+    _nav_target = st.session_state.pop("nav_page", None)
+    if _nav_target and _nav_target in _NAV_LABELS:
+        st.session_state["nav_radio"] = _NAV_OPTIONS[_NAV_LABELS.index(_nav_target)]
     page = st.radio(
         "Navigation",
-        options=[
-            "🏠  Dashboard",
-            "📋  Prescription Scanner",
-            "💬  Drug Interaction Chat",
-            "🔍  Drug Lookup",
-            "⚙️  Settings",
-        ],
+        options=_NAV_OPTIONS,
+        key="nav_radio",
         label_visibility="collapsed",
     )
     active_page = page.split("  ", 1)[-1].strip()
@@ -511,13 +560,16 @@ if active_page == "Dashboard":
 
     with col_actions:
         st.markdown("#### Quick Actions")
-        if st.button("📋  Scan New Prescription", use_container_width=True):
+        if st.button(u"📋  Scan New Prescription", use_container_width=True):
+            st.session_state["nav_page"] = "Prescription Scanner"
             st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("💬  Open Drug Chat", use_container_width=True):
+        if st.button(u"💬  Open Drug Chat", use_container_width=True):
+            st.session_state["nav_page"] = "Drug Interaction Chat"
             st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔍  Lookup Drug Profile", use_container_width=True):
+        if st.button(u"🔍  Lookup Drug Profile", use_container_width=True):
+            st.session_state["nav_page"] = "Drug Lookup"
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -537,6 +589,11 @@ if active_page == "Dashboard":
 # 
 
 elif active_page == "Prescription Scanner":
+    _bb, _ = st.columns([1, 7])
+    with _bb:
+        if st.button(u"← Dashboard", key="back_scanner", use_container_width=True):
+            st.session_state["nav_page"] = "Dashboard"
+            st.rerun()
     st.markdown("<div class='section-header'>📋 Prescription Scanner</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Upload a prescription image for automated OCR extraction "
@@ -675,6 +732,36 @@ elif active_page == "Prescription Scanner":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
+            # Optional AI refinement — triggered on demand (avoids auto-hang)
+            if st.button(u"✨  Refine with BioMistral AI", use_container_width=True, key="refine_btn"):
+                with st.spinner("Sending to BioMistral... (may take 1-2 min if model is loading)"):
+                    from ocr_engine import _refine_with_llm as _llm_fn
+                    import json as _jj
+                    _raw = st.session_state.ocr_result.get("extracted_text", "")
+                    refined = _llm_fn(_raw)
+                    try:
+                        llm_data = _jj.loads(refined)
+                        if "medications" in llm_data:
+                            _meds = llm_data["medications"]
+                            st.session_state.ocr_result["parsed_meds"] = [
+                                {"name": m.get("drug",""), "dose": m.get("dose",""),
+                                 "unit": m.get("unit",""), "sig": m.get("sig","")}
+                                for m in _meds
+                            ]
+                            st.session_state.ocr_result["medications"] = [
+                                (m.get("drug","") + " " + m.get("dose","") + m.get("unit","")).strip()
+                                for m in _meds
+                            ]
+                            for _fk, _sk in (("patient","patient"),("prescriber","prescriber")):
+                                if llm_data.get(_fk):
+                                    st.session_state.ocr_result[_sk] = llm_data[_fk]
+                            st.success(u"✅ BioMistral refined the prescription!")
+                            st.rerun()
+                    except Exception:
+                        st.info(u"ℹ BioMistral returned plain text (not JSON) — raw text updated.")
+                        st.session_state.ocr_result["extracted_text"] = refined
+                        st.rerun()
+
             if st.button("🔎  Check Drug Interactions", use_container_width=True):
                 with st.spinner("Querying interaction database..."):
                     interactions = check_drug_interactions(ocr["medications"])
@@ -720,6 +807,11 @@ elif active_page == "Prescription Scanner":
 # 
 
 elif active_page == "Drug Interaction Chat":
+    _bb, _ = st.columns([1, 7])
+    with _bb:
+        if st.button(u"← Dashboard", key="back_chat", use_container_width=True):
+            st.session_state["nav_page"] = "Dashboard"
+            st.rerun()
     st.markdown(
         "<div class='section-header'>💬 Drug Interaction Chat</div>", unsafe_allow_html=True
     )
@@ -794,6 +886,11 @@ elif active_page == "Drug Interaction Chat":
 # 
 
 elif active_page == "Drug Lookup":
+    _bb, _ = st.columns([1, 7])
+    with _bb:
+        if st.button(u"← Dashboard", key="back_lookup", use_container_width=True):
+            st.session_state["nav_page"] = "Dashboard"
+            st.rerun()
     st.markdown("<div class='section-header'>🔍 Drug Lookup</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Search comprehensive drug profiles from the clinical database</div>",
@@ -911,6 +1008,11 @@ elif active_page == "Drug Lookup":
 # 
 
 elif active_page == "Settings":
+    _bb, _ = st.columns([1, 7])
+    with _bb:
+        if st.button(u"← Dashboard", key="back_settings", use_container_width=True):
+            st.session_state["nav_page"] = "Dashboard"
+            st.rerun()
     st.markdown("<div class='section-header'>⚙️ Settings</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Configure backend connections and application preferences</div>",
