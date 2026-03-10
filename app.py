@@ -22,7 +22,7 @@ except ImportError:
     RAG_ENGINE_AVAILABLE = False
 
 
-#  Page Configuration (must be the first Streamlit call) 
+# --- Page Configuration (must be the first Streamlit call) ---
 st.set_page_config(
     page_title="Smart Drug Safety Assistant",
     page_icon="💊",
@@ -31,7 +31,7 @@ st.set_page_config(
 )
 
 
-#  Clinical CSS 
+# --- Clinical CSS ---
 CLINICAL_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -40,10 +40,10 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif !important;
 }
 
-/*  App background  */
+/* App background */
 .stApp { background-color: #F0F4F8; }
 
-/*  Sidebar  */
+/* Sidebar */
 [data-testid="stSidebar"] {
     background: linear-gradient(160deg, #0B3C5D 0%, #1A6B8A 100%) !important;
     border-right: 1px solid #093050;
@@ -61,7 +61,7 @@ html, body, [class*="css"] {
 }
 [data-testid="stSidebar"] .stRadio label:hover { background: rgba(255,255,255,0.16); }
 
-/*  Metric cards  */
+/* Metric cards */
 .metric-card {
     background: #fff;
     border-radius: 12px;
@@ -76,7 +76,7 @@ html, body, [class*="css"] {
 .metric-card .mc-value { font-size: 1.95rem; font-weight: 700; color: #0B3C5D; line-height: 1.1; }
 .metric-card .mc-label { font-size: 0.78rem; font-weight: 600; color: #6B8CAE; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 0.3rem; }
 
-/*  Section headings  */
+/* Section headings */
 .section-header {
     color: #0B3C5D;
     font-size: 1.55rem;
@@ -91,7 +91,7 @@ html, body, [class*="css"] {
     margin-bottom: 1.5rem;
 }
 
-/*  Buttons  */
+/* Buttons */
 .stButton > button {
     background: linear-gradient(135deg, #0B3C5D, #1A6B8A);
     color: #fff !important;
@@ -105,7 +105,7 @@ html, body, [class*="css"] {
 }
 .stButton > button:hover { opacity: 0.88; transform: translateY(-1px); }
 
-/*  File uploader  */
+/* File uploader */
 [data-testid="stFileUploader"] {
     background: #fff;
     border: 2px dashed #1A6B8A;
@@ -113,10 +113,10 @@ html, body, [class*="css"] {
     padding: 0.5rem;
 }
 
-/*  Chat messages  */
+/* Chat messages */
 [data-testid="stChatMessage"] { border-radius: 12px; margin-bottom: 0.6rem; }
 
-/*  Custom alert boxes  */
+/* Custom alert boxes */
 .custom-alert {
     border-radius: 10px;
     padding: 0.85rem 1.1rem;
@@ -129,7 +129,7 @@ html, body, [class*="css"] {
 .alert-warning { background: #FFF8E1; border-left: 4px solid #F9A825; color: #BF6000; }
 .alert-danger  { background: #FFEBEE; border-left: 4px solid #C62828; color: #B71C1C; }
 
-/*  Drug tag pills  */
+/* Drug tag pills */
 .drug-tag {
     display: inline-block;
     background: #E3F2FD;
@@ -142,7 +142,7 @@ html, body, [class*="css"] {
     margin: 0.2rem 0.15rem;
 }
 
-/*  OCR result card  */
+/* OCR result card */
 .ocr-card {
     background: #fff;
     border-radius: 12px;
@@ -163,7 +163,7 @@ html, body, [class*="css"] {
     margin: 0.5rem 0 0;
 }
 
-/*  Severity badges  */
+/* Severity badges */
 .sev-badge {
     display: inline-block;
     padding: 0.16rem 0.6rem;
@@ -177,16 +177,16 @@ html, body, [class*="css"] {
 .sev-moderate { background: #FFF8E1; color: #BF6000; }
 .sev-major    { background: #FFEBEE; color: #C62828; }
 
-/*  Scrollbar  */
+/* Scrollbar */
 ::-webkit-scrollbar       { width: 5px; }
 ::-webkit-scrollbar-thumb { background: #1A6B8A; border-radius: 3px; }
 ::-webkit-scrollbar-track { background: #F0F4F8; }
 
-/*  Hide Streamlit chrome  */
+/* Hide Streamlit chrome */
 #MainMenu, footer { visibility: hidden; }
 header            { display: none !important; }
 
-/*  AI typing indicator  */
+/* AI typing indicator */
 .typing-dots { display: flex; align-items: center; gap: 5px; padding: 4px 0; }
 .typing-dots span {
     display: inline-block; width: 9px; height: 9px;
@@ -203,13 +203,11 @@ header            { display: none !important; }
 """
 
 
-# 
-# PLACEHOLDER BACKEND CONNECTORS
-# 
+# --- PLACEHOLDER BACKEND CONNECTORS ---
 
 def process_prescription_ocr(image_bytes: bytes) -> dict:
     """
-    OCR pipeline  calls ocr_engine.process_image_bytes(), then enriches the
+    OCR pipeline calls ocr_engine.process_image_bytes(), then enriches the
     result with interaction checking and dosing validation where modules exist.
     Falls back to demo data when ocr_engine dependencies are unavailable.
     """
@@ -244,7 +242,7 @@ def process_prescription_ocr(image_bytes: bytes) -> dict:
                 "Rx 2 : Ibuprofen 400 mg      Sig: 1 tab PO PRN q6h\n"
                 "Rx 3 : Omeprazole 20 mg      Sig: 1 cap PO QD AC breakfast\n"
                 "\n"
-                "[DEMO DATA  OCR engine unavailable: " + str(exc) + "]"
+                "[DEMO DATA - OCR engine unavailable: " + str(exc) + "]"
             ),
             "medications":    ["Amoxicillin 500mg", "Ibuprofen 400mg", "Omeprazole 20mg"],
             "parsed_meds":    [],
@@ -260,27 +258,7 @@ def process_prescription_ocr(image_bytes: bytes) -> dict:
 
 def _get_ram_warning(exc: Exception, host: str) -> str:
     """Return an actionable error message for Ollama/BioMistral failures."""
-    import ctypes
     msg = str(exc)
-    try:
-        import ctypes
-        mem = ctypes.c_uint64(0)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(
-            type("MEMORYSTATUSEX", (ctypes.Structure,), {
-                "_fields_": [("dwLength", ctypes.c_uint32),
-                             ("dwMemoryLoad", ctypes.c_uint32),
-                             ("ullTotalPhys", ctypes.c_uint64),
-                             ("ullAvailPhys", ctypes.c_uint64),
-                             ("ullTotalPageFile", ctypes.c_uint64),
-                             ("ullAvailPageFile", ctypes.c_uint64),
-                             ("ullTotalVirtual", ctypes.c_uint64),
-                             ("ullAvailVirtual", ctypes.c_uint64),
-                             ("ullAvailExtendedVirtual", ctypes.c_uint64)],
-            })()
-        ))
-    except Exception:
-        pass
-    # Simpler psutil-based check
     free_gb = 0.0
     try:
         import psutil
@@ -311,12 +289,12 @@ def _get_ram_warning(exc: Exception, host: str) -> str:
 
 
 def query_ollama_llm(user_message: str, chat_history: list) -> str:
-    """BioMistral 7B via Ollama  clinical pharmacist analysis."""
+    """BioMistral 7B via Ollama - clinical pharmacist analysis."""
     import ollama as _ollama
     import re as _re
     import streamlit as st
 
-    # 1. Query expansion (medical abbreviations  full terms for better RAG recall)
+    # 1. Query expansion
     _SPELL = {
         "ckd":  "chronic kidney disease",
         "inr":  "warfarin monitoring",
@@ -329,7 +307,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     for _abbr, _full in _SPELL.items():
         _msg = _re.sub(r"\b" + _abbr + r"\b", _full, _msg, flags=_re.IGNORECASE)
 
-    # 2. Detect whether this is a clinical / drug-related query
+    # 2. Detect clinical query
     _CLINICAL_RE = _re.compile(
         r"\b(mg|mcg|tablet|capsule|dose|drug|medication|medicine|prescription|"
         r"interaction|warfarin|metformin|aspirin|amoxicillin|ibuprofen|omeprazole|"
@@ -340,13 +318,13 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     )
     _is_clinical = bool(_CLINICAL_RE.search(_msg)) or len(_msg.split()) >= 6
 
-    # 3. RAG retrieval (clinical queries only, high-confidence threshold)
+    # 3. RAG retrieval
     _rag_block = ""
     rag_chunks = []
     if _is_clinical and RAG_ENGINE_AVAILABLE:
         try:
             rag_chunks = retrieve(_msg, n_results=3)
-            if rag_chunks and rag_chunks[0].get("score", 0) >= 0.65:
+            if rag_chunks and rag_chunks[0].get("score", 0) >= 0.50: # Threshold lowered for better reading
                 _refs = [
                     "[{drug}]\n{text}".format(
                         drug=c.get("drug", "").upper(), text=c["text"]
@@ -360,39 +338,30 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
 
-    # 4. System prompt  two modes: clinical 5-section vs conversational
+    # 4. System prompt
+    # 4. System prompt (تم تعديله لإزالة العناوين الرقمية)
     if _is_clinical:
         _SYS = (
-            "You are a Senior Clinical Pharmacist AI.\n"
-            "Analyze the drug interaction or clinical case below.\n\n"
-            "Your response must contain exactly five numbered sections:\n"
-            "  1. INTERACTION SUMMARY: classify as MAJOR, MODERATE, or MINOR; give a one-sentence reason.\n"
-            "  2. MECHANISM: explain the pharmacokinetic or pharmacodynamic basis.\n"
-            "  3. CLINICAL EFFECT: describe the consequences for the patient.\n"
-            "  4. MANAGEMENT: state the recommended clinician or pharmacist action.\n"
-            "  5. MONITORING: list the parameters to monitor (labs, vitals, symptoms).\n\n"
-            "LANGUAGE: reply in the same language as the user; keep drug names and enzyme names in English.\n"
-            "Provide real clinical details. Do not copy these instructions into your answer.\n"
-            "IMPORTANT: Write ALL FIVE sections in one reply. Do not stop after section 1."
+           "You are a Clinical Pharmacist Specialist. Your goal is to analyze the synergy between medications.\n"
+            "When a combination like Aspirin and Warfarin is mentioned, you MUST:\n"
+            "- Explain the separate mechanism of EACH drug clearly.\n"
+            "- Explain the 'Pharmacodynamic Interaction' (how they work together to increase bleeding risk).\n"
+            "- Detail the specific receptors or enzymes involved (e.g., COX-1, TXA2, Vitamin K Epoxide Reductase).\n"
+            "- List clinical red flags for the patient (e.g., Melena, Hematemesis, Petechiae).\n"
+            "- Provide actionable pharmacist recommendations (e.g., PPI co-prescription, INR monitoring).\n"
+            "DO NOT use numbered lists. Use professional, flowing paragraphs.\n"
+            "LANGUAGE RULE: Respond in Arabic, but keep medical terms and drug names in English."
         ) + _rag_block
     else:
-        _SYS = (
-            "You are a helpful Clinical Pharmacist AI assistant. "
-            "Respond politely and concisely. "
-            "Match the language the user used (Arabic or English)."
-        )
+       _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely."
 
-    # 5. Mistral [INST] prompt
-    # Clinical: seed past the section label so the model fills in content, not the template.
-    # Conversational: no seed, model answers freely.
+    # 5. Build prompt (شيلنا الـ Seed اللي كان بيجبره يبدأ بـ 1.)
     if _is_clinical:
-        full_prompt = (
+       full_prompt = (
             f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
-            f"Analyze this drug interaction or clinical case: {_msg} [/INST]\n"
-            f"1. INTERACTION SUMMARY:"
+            f"As a pharmacist, provide an in-depth clinical analysis of the interaction between: {_msg} [/INST]\n"
+            f"التحليل الصيدلاني الإكلينيكي:"
         )
-    else:
-        full_prompt = f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n{_msg} [/INST]"
 
     # 6. Generate
     try:
@@ -400,32 +369,31 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         resp = client.generate(
             model=_MODEL,
             prompt=full_prompt,
-            raw=True,
+            raw=True, 
             options={
-                "num_predict":    1500,
-                "temperature":    0.2,
-                "top_p":          0.85,
-                "repeat_penalty": 1.0,   # off: do not penalise section number tokens
-                "num_ctx":        4096,
-                "num_gpu":        20,
+                "num_predict": 1500,
+                "temperature": 0.3, # Increased slightly to prevent early stopping
+                "top_p":       0.9,
+                "num_ctx":     2048,
+                "num_gpu":     20
             },
         )
-        # Prepend the seeded "1." back for clinical answers
-        answer = ("1. INTERACTION SUMMARY:" if _is_clinical else "") + resp.response.strip()
+        
+        answer = resp.response.strip()
 
-        # Strip any leaked prompt markers
-        for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]"):
-            idx = answer.rfind(_marker)
-            if idx != -1:
-                answer = answer[idx + len(_marker):].strip()
+        # Clean up leaked tags
+        for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]", "<s>", "</s>"):
+            answer = answer.replace(_marker, "")
 
         if len(answer) < 15:
-            return "⚠️ لم يصدر الموديل رداً. تأكد من تشغيل Ollama وأعد المحاولة."
+            return "⚠️ لم يصدر الموديل رداً. حاول إعادة صياغة السؤال."
 
-        if rag_chunks and rag_chunks[0].get("score", 0) >= 0.65:
+        # Add Citations
+        scored = [c for c in rag_chunks if c.get("score", 0) >= 0.50]
+        if scored:
             from rag_engine import format_citations
-            answer += f"\n\n---\n{format_citations(rag_chunks)}"
-
+            answer += f"\n\n---\n{format_citations(scored)}"
+            
         return answer
 
     except Exception as exc:
@@ -433,10 +401,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
 
 
 def check_drug_interactions(drug_list: list) -> list:
-    """Query RxNav REST API for real drug-drug interactions.
-
-    Free, no API key required. Falls back to empty list on any network error.
-    """
+    """Query RxNav REST API for real drug-drug interactions."""
     import requests as _req
 
     if len(drug_list) < 2:
@@ -493,15 +458,9 @@ def check_drug_interactions(drug_list: list) -> list:
 
     return results
 
-def lookup_drug_info(drug_name: str) -> dict:
-    """
-    Placeholder  fetches comprehensive drug profile.
 
-    Production implementation:
-      - RxNorm  /rxcui?name={drug}  for identifier
-      - OpenFDA  /drug/label?search=openfda.generic_name:{drug}  for full label
-      - DrugBank API for structured pharmacological data
-    """
+def lookup_drug_info(drug_name: str) -> dict:
+    """Placeholder fetches comprehensive drug profile."""
     time.sleep(0.9)
     _db = {
         "amoxicillin": {
@@ -576,9 +535,7 @@ def lookup_drug_info(drug_name: str) -> dict:
     })
 
 
-# 
-# SESSION STATE
-# 
+# --- SESSION STATE ---
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
@@ -601,16 +558,12 @@ if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 
 
-# 
-# INJECT CSS
-# 
+# --- INJECT CSS ---
 
 st.markdown(CLINICAL_CSS, unsafe_allow_html=True)
 
 
-# 
-# SIDEBAR
-# 
+# --- SIDEBAR ---
 
 with st.sidebar:
     st.markdown(
@@ -686,9 +639,7 @@ with st.sidebar:
     st.caption(f"v1.0.0  ·  {datetime.now().strftime('%d %b %Y')}")
 
 
-# 
-# PAGE: DASHBOARD
-# 
+# --- PAGE: DASHBOARD ---
 
 if active_page == "Dashboard":
     st.markdown("<div class='section-header'>🏠 Dashboard</div>", unsafe_allow_html=True)
@@ -697,7 +648,7 @@ if active_page == "Dashboard":
         unsafe_allow_html=True,
     )
 
-    #  Metric row 
+    # Metric row
     mc1, mc2, mc3, mc4 = st.columns(4)
     metrics = [
         ("🔬", "1 284", "Prescriptions Scanned"),
@@ -765,9 +716,7 @@ if active_page == "Dashboard":
             st.markdown("")
 
 
-# 
-# PAGE: PRESCRIPTION SCANNER
-# 
+# --- PAGE: PRESCRIPTION SCANNER ---
 
 elif active_page == "Prescription Scanner":
     _bb, _ = st.columns([1, 7])
@@ -784,7 +733,7 @@ elif active_page == "Prescription Scanner":
 
     col_upload, col_result = st.columns(2, gap="large")
 
-    #  Upload column 
+    # Upload column
     with col_upload:
         st.markdown("#### Upload Prescription")
         uploaded_file = st.file_uploader(
@@ -850,7 +799,7 @@ elif active_page == "Prescription Scanner":
                 unsafe_allow_html=True,
             )
 
-    #  Results column 
+    # Results column
     with col_result:
         st.markdown("#### Extraction Results")
         ocr = st.session_state.ocr_result
@@ -1017,9 +966,7 @@ elif active_page == "Prescription Scanner":
             )
 
 
-# 
-# PAGE: DRUG INTERACTION CHAT
-# 
+# --- PAGE: DRUG INTERACTION CHAT ---
 
 elif active_page == "Drug Interaction Chat":
     _bb, _ = st.columns([1, 7])
@@ -1071,7 +1018,7 @@ elif active_page == "Drug Interaction Chat":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    #  Chat history + optimistic pending indicator 
+    # Chat history + optimistic pending indicator
     chat_box = st.container(height=460)
     with chat_box:
         for msg in st.session_state.chat_history:
@@ -1096,7 +1043,7 @@ elif active_page == "Drug Interaction Chat":
                 )
             st.rerun()
 
-    #  Input bar   append user msg immediately, set pending, rerun to show dots
+    # Input bar - append user msg immediately, set pending, rerun to show dots
     if user_input := st.chat_input(
         "Ask about interactions, dosages, contraindications, adverse effects..."
     ):
@@ -1104,7 +1051,7 @@ elif active_page == "Drug Interaction Chat":
         st.session_state.pending_input = user_input
         st.rerun()
 
-    #  Clear button 
+    # Clear button
     col_clr, _ = st.columns([1, 5])
     with col_clr:
         if st.button("  Clear Chat"):
@@ -1115,9 +1062,7 @@ elif active_page == "Drug Interaction Chat":
             st.rerun()
 
 
-# 
-# PAGE: DRUG LOOKUP
-# 
+# --- PAGE: DRUG LOOKUP ---
 
 elif active_page == "Drug Lookup":
     _bb, _ = st.columns([1, 7])
@@ -1158,7 +1103,7 @@ elif active_page == "Drug Lookup":
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        #  Drug profile header 
+        # Drug profile header
         brands_str = ", ".join(info["brand_names"])
         st.markdown(
             f"<div class='ocr-card'>"
@@ -1237,9 +1182,7 @@ elif active_page == "Drug Lookup":
         st.warning("Please enter a drug name to search.")
 
 
-# 
-# PAGE: SETTINGS
-# 
+# --- PAGE: SETTINGS ---
 
 elif active_page == "Settings":
     _bb, _ = st.columns([1, 7])
@@ -1253,7 +1196,7 @@ elif active_page == "Settings":
         unsafe_allow_html=True,
     )
 
-    #  Ollama 
+    # Ollama
     with st.expander("🤖  Ollama LLM Configuration", expanded=True):
         oc1, oc2 = st.columns(2)
         with oc1:
@@ -1296,7 +1239,7 @@ elif active_page == "Settings":
             key="ol_system_prompt_custom",
         )
 
-    #  OCR 
+    # OCR
     with st.expander("🔬  OCR Engine Configuration", expanded=False):
         ocr_engine = st.selectbox(
             "OCR Engine",
@@ -1318,7 +1261,7 @@ elif active_page == "Settings":
         )
         st.checkbox("Pre-process image (deskew, denoise)", value=True, key="ocr_preprocess")
 
-    #  Drug Database 
+    # Drug Database
     with st.expander("💊  Drug Database Configuration", expanded=False):
         db_source = st.selectbox(
             "Primary Database",
@@ -1329,7 +1272,7 @@ elif active_page == "Settings":
             st.text_input(f"{db_source} API Key", type="password", key="db_key")
         st.checkbox("Cache API responses (24 h)", value=True, key="db_cache")
 
-    #  Display Preferences 
+    # Display Preferences
     with st.expander("🎨  Display Preferences", expanded=False):
         st.checkbox("Show OCR confidence score",             value=True,  key="show_conf")
         st.checkbox("Auto-check interactions after OCR",     value=True,  key="auto_check")
