@@ -259,6 +259,11 @@ def preprocess_prescription_image(image_bytes: bytes) -> bytes:
         bgr = _cv2.bilateralFilter(bgr, d=9, sigmaColor=75, sigmaSpace=75)
         blurred = _cv2.GaussianBlur(bgr, (0, 0), sigmaX=2)
         bgr = _cv2.addWeighted(bgr, 1.5, blurred, -0.5, 0)
+        # Suppress blue/purple circular watermark by filling with white
+        _hsv = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2HSV)
+        _wm_mask = _cv2.inRange(_hsv, _np.array([90, 40, 40]), _np.array([140, 255, 255]))
+        _wm_mask = _cv2.dilate(_wm_mask, _np.ones((5, 5), _np.uint8), iterations=2)
+        bgr[_wm_mask > 0] = [255, 255, 255]
         buf = _io.BytesIO()
         _PILImage.fromarray(_cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB)).save(buf, format='PNG')
         return buf.getvalue()
@@ -313,45 +318,69 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
                 image_bytes = preprocess_prescription_image(image_bytes)
                 _mime = "image/png"
                 if len(image_bytes) != _orig:
-                    _pp_steps = ["Upscale", "Deskew", "CLAHE", "Bilateral", "Sharpen"]
+                    _pp_steps = ["Upscale", "Deskew", "CLAHE", "Bilateral", "Sharpen", "Dewatermark"]
             except Exception:
                 pass
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         _groq = _Groq(api_key=api_key)
 
+        # Stage 1  raw text transcription via vision (read every word faithfully)
+        _stage1 = _groq.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "You are reading a handwritten medical prescription. "
+                            "The prescription may contain Arabic and/or English text. "
+                            "Ignore any circular background watermark or rubber stamp. "
+                            "Carefully read EVERY line of text in the image from top to bottom. "
+                            "Transcribe ALL visible text exactly as you see it, line by line. "
+                            "Include: doctor/clinic name, patient name, date, and EVERY medication line. "
+                            "For each medication line try to read: drug name, dose/strength, dosing instructions. "
+                            "If a word is hard to read, write your best reading followed by [?]. "
+                            "Output ONLY the raw transcribed text  no JSON, no explanation."
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{_mime};base64,{b64}"},
+                    },
+                ],
+            }],
+            temperature=0.1,
+            max_tokens=768,
+            top_p=1,
+            stream=False,
+            stop=None,
+        )
+        _raw_text = _stage1.choices[0].message.content.strip()
+
+        # Stage 2  parse raw text into structured JSON (text-only, no image needed)
         completion = _groq.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Analyse this handwritten prescription image (may contain Arabic and/or English; ignore any background watermark stamp). "
-                                "Extract ALL medications and return ONLY a valid JSON object "
-                                "with this exact structure:\n"
-                                "{\n"
-                                '  "patient": "name or null",\n'
-                                '  "date": "date string or null",\n'
-                                '  "prescriber": "doctor name or null",\n'
-                                '  "medications": [\n'
-                                '    {"name": "drug name", "dosage": "dose with unit", '
-                                '"frequency": "how often", "duration": "how long or null"}\n'
-                                "  ]\n"
-                                "}\n"
-                                "IMPORTANT: If you are unsure about any word or value, "
-                                "append ' (uncertain)' to that field's string value. "
-                                "Return ONLY the JSON object  no markdown, no explanation."
-                            ),
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{_mime};base64,{b64}"},
-                        },
-                    ],
-                }
-            ],
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Parse the following handwritten prescription text into a JSON object.\n\n"
+                    f"PRESCRIPTION TEXT:\n{_raw_text}\n\n"
+                    "Return ONLY a valid JSON object with this exact structure:\n"
+                    "{\n"
+                    '  "patient": "name or null",\n'
+                    '  "date": "date string or null",\n'
+                    '  "prescriber": "doctor name or null",\n'
+                    '  "medications": [\n'
+                    '    {"name": "drug name", "dosage": "dose with unit", '
+                    '"frequency": "how often", "duration": "how long or null"}\n'
+                    "  ]\n"
+                    "}\n"
+                    "Include ALL medications mentioned  do not skip any drug name. "
+                    "For uncertain values append ' (uncertain)'. "
+                    "Return ONLY the JSON object  no markdown, no explanation."
+                ),
+            }],
             temperature=0.0,
             max_tokens=1024,
             top_p=1,
@@ -409,7 +438,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         return {
             "status":        "success",
             "raw_json":      parsed,
-            "extracted_text": raw,
+            "extracted_text": _raw_text,
             "medications":   med_names,
             "parsed_meds":   medications,
             "patient":       parsed.get("patient") or "",
