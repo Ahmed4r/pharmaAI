@@ -1,0 +1,188 @@
+[
+  {
+    "id": "amoxicillin_overview",
+    "drug": "Amoxicillin",
+    "category": "overview",
+    "text": "Amoxicillin is an aminopenicillin beta-lactam antibiotic. It inhibits bacterial cell wall synthesis by binding to penicillin-binding proteins (PBPs), preventing peptidoglycan cross-linking and causing bacterial cell lysis. Spectrum: gram-positive (Streptococcus, Enterococcus) and some gram-negative organisms (H. influenzae, E. coli). Brand names: Amoxil, Trimox. Pregnancy category B."
+  },
+  {
+    "id": "amoxicillin_dosing",
+    "drug": "Amoxicillin",
+    "category": "dosing",
+    "text": "Amoxicillin standard adult dose: 250-500 mg every 8 hours OR 500-875 mg every 12 hours orally. Severe infections: 875 mg twice daily. Dental prophylaxis: 2 g single dose 30-60 min before procedure. Paediatric dose: 25-45 mg/kg/day in divided doses. Renal adjustment required when CrCl < 30 mL/min: use 250-500 mg every 12 hours. CrCl < 10 mL/min: 250-500 mg every 24 hours. Haemodialysis: dose after each session."
+  },
+  {
+    "id": "amoxicillin_interactions",
+    "drug": "Amoxicillin",
+    "category": "interactions",
+    "text": "Amoxicillin drug interactions: (1) Warfarin - amoxicillin can potentiate anticoagulant effect of warfarin by altering gut flora that produces vitamin K; monitor INR closely, major interaction risk of bleeding. (2) Methotrexate - penicillins reduce renal clearance of methotrexate, increasing toxicity risk; avoid combination or monitor methotrexate levels. (3) Oral contraceptives - theoretical reduction in efficacy due to gut flora changes; clinical significance debated. (4) Probenecid - increases amoxicillin plasma levels by reducing renal tubular secretion; sometimes used intentionally. (5) Allopurinol - increases risk of skin rash when combined with amoxicillin, especially in patients with hyperuricaemia."
+  },
+  {
+    "id": "amoxicillin_contraindications",
+    "drug": "Amoxicillin",
+    "category": "contraindications",
+    "text": "Amoxicillin contraindications: Hypersensitivity or allergy to penicillins (absolute contraindication). Cross-reactivity with cephalosporins (~1-2% risk) - use with caution. Infectious mononucleosis (EBV infection) - amoxicillin causes widespread maculopapular rash in ~80% of cases, avoid completely. Severe renal impairment requires dose reduction. Side effects: diarrhoea (10-15%), nausea, skin rash, urticaria, hypersensitivity reactions including rare anaphylaxis (<0.01%)."
+  },
+  {
+    "id": "ibuprofen_overview",
+    "drug": "Ibuprofen",
+    "category": "overview",
+    "text": "Ibuprofen is a non-selective NSAID (non-steroidal anti-inflammatory drug) that inhibits both COX-1 and COX-2 cyclooxygenase enzymes. This reduces prostaglandin synthesis, providing analgesic, antipyretic, and anti-inflammatory effects. Brand names: Advil, Motrin, Nurofen, Brufen. Pregnancy category C (D in third trimester - causes premature closure of ductus arteriosus). Used for pain, fever, osteoarthritis, rheumatoid arthritis, dysmenorrhoea."
+  },
+  {
+    "id": "ibuprofen_dosing",
+    "drug": "Ibuprofen",
+    "category": "dosing",
+    "text": "Ibuprofen adult dosing: OTC pain/fever: 200-400 mg every 4-6 hours, maximum 1200 mg/day. Prescription anti-inflammatory: 400-800 mg three to four times daily, maximum 3200 mg/day. Take with food or milk to reduce GI side effects. Paediatric: 5-10 mg/kg every 6-8 hours, max 40 mg/kg/day for children over 6 months. Renal impairment: avoid if CrCl < 30 mL/min - NSAIDs reduce renal blood flow and can precipitate acute kidney injury. Elderly patients: use lowest effective dose, increased risk of GI bleeding and renal toxicity."
+  },
+  {
+    "id": "ibuprofen_interactions",
+    "drug": "Ibuprofen",
+    "category": "interactions",
+    "text": "Ibuprofen major drug-drug interactions: (1) Warfarin / anticoagulants - NSAIDs inhibit platelet aggregation via COX-1 and can cause GI bleeding; combination with warfarin significantly increases haemorrhage risk, MAJOR interaction, avoid or monitor closely. (2) Aspirin - ibuprofen can block the cardioprotective antiplatelet effect of low-dose aspirin by competing for COX-1 binding; take aspirin 30 min before ibuprofen. (3) ACE inhibitors / ARBs (lisinopril, enalapril, losartan) - NSAIDs reduce renal prostaglandins causing sodium retention and reduced antihypertensive efficacy; risk of acute kidney injury especially in elderly or dehydrated patients. (4) Diuretics (furosemide, hydrochlorothiazide) - NSAIDs blunt diuretic and antihypertensive effects. (5) Lithium - NSAIDs reduce renal lithium clearance, increasing lithium toxicity risk; monitor lithium levels. (6) Methotrexate - NSAIDs reduce methotrexate excretion, major toxicity risk. (7) SSRIs (fluoxetine, sertraline) - combined with NSAIDs increases GI bleeding risk 3-15x. (8) Corticosteroids - additive GI ulceration risk."
+  },
+  {
+    "id": "ibuprofen_contraindications",
+    "drug": "Ibuprofen",
+    "category": "contraindications",
+    "text": "Ibuprofen contraindications: Active peptic ulcer disease or GI bleeding (absolute contraindication). Severe renal impairment CrCl < 30 mL/min. Severe hepatic impairment. History of NSAID-induced asthma or urticaria (aspirin-exacerbated respiratory disease). Third trimester of pregnancy - causes premature closure of ductus arteriosus. Post-CABG surgery - increased cardiovascular risk. Side effects: GI upset, dyspepsia, peptic ulcer, renal impairment, fluid retention, elevated blood pressure, cardiovascular risk with prolonged use, hypersensitivity reactions."
+  },
+  {
+    "id": "warfarin_overview",
+    "drug": "Warfarin",
+    "category": "overview",
+    "text": "Warfarin is a vitamin K antagonist oral anticoagulant. It inhibits VKORC1 (vitamin K epoxide reductase), preventing regeneration of active vitamin K, thus reducing synthesis of clotting factors II, VII, IX, and X, and anticoagulant proteins C and S. Used for atrial fibrillation stroke prevention, venous thromboembolism (DVT/PE) treatment and prevention, mechanical heart valve anticoagulation. Brand names: Coumadin, Jantoven. Narrow therapeutic index - requires INR monitoring. Target INR 2-3 for most indications, 2.5-3.5 for mechanical heart valves."
+  },
+  {
+    "id": "warfarin_dosing",
+    "drug": "Warfarin",
+    "category": "dosing",
+    "text": "Warfarin dosing is highly individualised based on INR response. Typical starting dose: 2-5 mg/day orally. Loading dose protocols exist but must be cautious in elderly or those with hepatic impairment. Dose adjustment based on INR: target INR 2-3 for AF and VTE; 2.5-3.5 for mechanical valves. Monitor INR frequently when initiating or changing doses (every 1-3 days initially, then weekly, then monthly when stable). Renal impairment: reduced warfarin metabolism may increase sensitivity; start low and monitor. Elderly: increased sensitivity, start with 2-3 mg/day. Half-life 20-60 hours (variable)."
+  },
+  {
+    "id": "warfarin_interactions",
+    "drug": "Warfarin",
+    "category": "interactions",
+    "text": "Warfarin has extensive drug interactions affecting INR. INCREASES anticoagulant effect (raises INR, bleed risk): (1) Amoxicillin, ciprofloxacin, metronidazole - alter gut vitamin K-producing bacteria. (2) Aspirin, NSAIDs (ibuprofen, naproxen) - inhibit platelets AND cause GI bleeding. (3) Fluconazole, miconazole - inhibit CYP2C9, major interaction. (4) Amiodarone - potent CYP2C9 and 3A4 inhibitor, increases warfarin effect substantially. (5) Simvastatin, fluvastatin - CYP2C9 inhibition. (6) Trimethoprim-sulfamethoxazole (cotrimoxazole) - CYP2C9 inhibitor. (7) Omeprazole, esomeprazole - CYP2C19 inhibition. (8) Fish oil in high doses. DECREASES anticoagulant effect (lowers INR): (1) Rifampicin - potent CYP inducer. (2) Carbamazepine, phenytoin - CYP inducers. (3) Vitamin K-rich foods (spinach, kale, broccoli) - substrate competition. (4) St John's Wort - herbal CYP inducer. Monitor INR within 3-5 days of any interacting drug addition."
+  },
+  {
+    "id": "warfarin_contraindications",
+    "drug": "Warfarin",
+    "category": "contraindications",
+    "text": "Warfarin contraindications: Pregnancy (all trimesters) - crosses placenta, causes warfarin embryopathy, fetal haemorrhage; use LMWH instead. Active major bleeding. Haemorrhagic stroke. Recent neurosurgery, eye surgery, or traumatic surgery. Severe uncontrolled hypertension. Blood dyscrasias. Side effects: bleeding (most serious and common), skin necrosis (rare, protein C deficiency), purple toe syndrome (rare cholesterol embolism). Bleeding treatment: hold warfarin, vitamin K 1-10 mg orally or IV, prothrombin complex concentrate (PCC) for major bleeding."
+  },
+  {
+    "id": "metformin_overview",
+    "drug": "Metformin",
+    "category": "overview",
+    "text": "Metformin is a biguanide antidiabetic drug, first-line treatment for type 2 diabetes mellitus. Mechanism: activates AMPK pathway, reduces hepatic gluconeogenesis (primary mechanism), improves peripheral insulin sensitivity, reduces intestinal glucose absorption. Does NOT cause hypoglycaemia when used as monotherapy. Also used in polycystic ovary syndrome (PCOS). Brand names: Glucophage, Glumetza, Fortamet. Pregnancy category B, considered safe in gestational diabetes."
+  },
+  {
+    "id": "metformin_dosing",
+    "drug": "Metformin",
+    "category": "dosing",
+    "text": "Metformin dosing: Start low and titrate slowly to minimum effective dose to reduce GI side effects. Initial dose: 500 mg once or twice daily with meals, or 850 mg once daily with breakfast. Increase by 500 mg weekly or 850 mg every 2 weeks. Maximum: 2550-3000 mg/day in divided doses (2-3 times daily). Renal dosing: eGFR 45-60 mL/min/1.73m2 - continue but monitor renal function every 3-6 months. eGFR 30-45 - reduce dose, review benefit/risk. eGFR < 30 - contraindicated (lactic acidosis risk). Hold before iodinated contrast media if eGFR < 60."
+  },
+  {
+    "id": "metformin_interactions",
+    "drug": "Metformin",
+    "category": "interactions",
+    "text": "Metformin drug interactions: (1) Iodinated contrast agents - hold metformin 48 hours before and after IV contrast if eGFR < 60; risk of contrast-induced nephropathy leading to metformin accumulation and lactic acidosis. (2) Alcohol - excessive alcohol increases lactic acidosis risk; avoid heavy drinking. (3) Cimetidine - reduces metformin renal tubular secretion, increasing plasma levels; monitor for side effects. (4) Topiramate, zonisamide - increase lactic acidosis risk. (5) Carbonic anhydrase inhibitors (acetazolamide) - increase lactic acidosis risk. (6) ACE inhibitors - may improve insulin sensitivity, generally beneficial combination. (7) Corticosteroids - can raise blood glucose and reduce metformin efficacy; may need dose adjustment."
+  },
+  {
+    "id": "metformin_contraindications",
+    "drug": "Metformin",
+    "category": "contraindications",
+    "text": "Metformin contraindications: eGFR < 30 mL/min/1.73m2 (lactic acidosis risk). Hepatic impairment (reduced lactate clearance). Excessive alcohol consumption. Conditions predisposing to hypoxia: heart failure (NYHA class III-IV), respiratory failure, sepsis. Temporarily withhold before iodinated contrast procedures and general anaesthesia. Side effects: GI (nausea, diarrhoea, abdominal pain) in up to 30% - usually transient. Vitamin B12 deficiency with long-term use. Lactic acidosis: rare but serious, especially in renal impairment."
+  },
+  {
+    "id": "omeprazole_overview",
+    "drug": "Omeprazole",
+    "category": "overview",
+    "text": "Omeprazole is a proton pump inhibitor (PPI). It irreversibly inhibits the H+/K+ ATPase (proton pump) in gastric parietal cells, producing potent and long-lasting suppression of gastric acid secretion. Used for GORD/GERD (gastro-oesophageal reflux disease), peptic ulcer disease, H. pylori eradication (as part of triple therapy), Zollinger-Ellison syndrome, stress ulcer prophylaxis, and gastroprotection with NSAIDs or corticosteroids. Brand names: Losec, Prilosec. Pregnancy category C."
+  },
+  {
+    "id": "omeprazole_interactions",
+    "drug": "Omeprazole",
+    "category": "interactions",
+    "text": "Omeprazole drug interactions: (1) Clopidogrel - MAJOR interaction. Omeprazole inhibits CYP2C19, reducing activation of clopidogrel to its active metabolite, potentially reducing antiplatelet efficacy. Prefer pantoprazole or rabeprazole if PPI needed with clopidogrel. (2) Warfarin - omeprazole inhibits CYP2C19, may increase warfarin levels and INR; monitor INR. (3) Methotrexate - increased methotrexate levels reported; monitor toxicity. (4) Atazanavir, rilpivirine (HIV drugs) - require acidic environment for absorption; PPIs significantly reduce absorption, may cause treatment failure, avoid or adjust. (5) Ketoconazole, itraconazole - reduced absorption due to elevated gastric pH. (6) Digoxin - increased absorption at higher gastric pH; monitor digoxin levels. (7) Tacrolimus - increased tacrolimus exposure via CYP3A4 and CYP2C19 inhibition."
+  },
+  {
+    "id": "atorvastatin_overview",
+    "drug": "Atorvastatin",
+    "category": "overview",
+    "text": "Atorvastatin is an HMG-CoA reductase inhibitor (statin). It competitively inhibits HMG-CoA reductase, the rate-limiting enzyme in cholesterol biosynthesis in the liver. This reduces LDL-cholesterol (15-55% depending on dose), mildly raises HDL, and reduces triglycerides. Also has pleiotropic effects: anti-inflammatory, stabilises atherosclerotic plaques. Indicated for hypercholesterolaemia, mixed dyslipidaemia, cardiovascular risk reduction (primary and secondary prevention). Brand names: Lipitor. Pregnancy: contraindicated (category X)."
+  },
+  {
+    "id": "atorvastatin_interactions",
+    "drug": "Atorvastatin",
+    "category": "interactions",
+    "text": "Atorvastatin drug interactions (risk of myopathy/rhabdomyolysis is key concern): (1) Cyclosporine - major interaction, increases atorvastatin AUC 8-10x via CYP3A4 and transport protein inhibition; avoid or use maximum 10 mg atorvastatin. (2) Clarithromycin, erythromycin - CYP3A4 inhibitors, significantly increase atorvastatin levels; suspend statin during short antibiotic courses. (3) Azole antifungals (itraconazole, ketoconazole) - strong CYP3A4 inhibitors; avoid combination. (4) HIV protease inhibitors (ritonavir, lopinavir) - potent CYP3A4 inhibitors; use lowest atorvastatin dose with caution. (5) Amiodarone - increases myopathy risk. (6) Fibrates (gemfibrozil) - additive myopathy risk; monitor CK. (7) Warfarin - atorvastatin may slightly increase INR; monitor when initiating. (8) Niacin in high doses - additive myopathy risk. (9) Colchicine - increased myopathy risk. (10) Grapefruit juice - inhibits intestinal CYP3A4, increases atorvastatin levels; avoid large amounts."
+  },
+  {
+    "id": "aspirin_interactions",
+    "drug": "Aspirin",
+    "category": "interactions",
+    "text": "Aspirin drug interactions: (1) Ibuprofen / NSAIDs - ibuprofen competes with aspirin for COX-1 binding, blocking the irreversible antiplatelet effect of low-dose aspirin; take aspirin 30+ minutes before ibuprofen to preserve cardioprotection. (2) Warfarin - additive bleeding risk, aspirin inhibits platelets and causes GI bleeding; MAJOR interaction. (3) Heparin - additive bleeding risk. (4) Clopidogrel - dual antiplatelet therapy increases bleeding risk but used intentionally in ACS (dual antiplatelet therapy); carry risk of GI bleeding. (5) SSRIs - triple combination (aspirin + SSRI + warfarin or NSAID) greatly increases GI bleed risk. (6) Methotrexate - aspirin reduces methotrexate clearance, toxicity risk at higher aspirin doses. (7) Probenecid - aspirin reduces uricosuric effect of probenecid. (8) ACE inhibitors - high-dose aspirin may reduce their cardioprotective effects."
+  },
+  {
+    "id": "lisinopril_interactions",
+    "drug": "Lisinopril",
+    "category": "interactions",
+    "text": "Lisinopril (ACE inhibitor) drug interactions: (1) NSAIDs (ibuprofen, naproxen, diclofenac) - reduce antihypertensive and renoprotective effect; increase risk of acute kidney injury, especially with diuretics (triple whammy: ACEi + NSAID + diuretic); MAJOR interaction in elderly and dehydrated. (2) Potassium-sparing diuretics (spironolactone, amiloride) and potassium supplements - additive hyperkalaemia risk; monitor potassium. (3) ARBs (losartan, valsartan) - dual RAAS blockade increases hyperkalaemia and renal failure risk; avoid unless special circumstances. (4) Aliskiren - dual RAAS blockade, avoid in diabetes or renal impairment. (5) Lithium - ACE inhibitors reduce lithium clearance, increasing toxicity; monitor lithium levels. (6) Antidiabetic drugs - ACE inhibitors may enhance hypoglycaemic effect; especially in renal impairment. (7) Diuretics (furosemide, HCTZ) - first-dose hypotension risk; initiate at low dose."
+  },
+  {
+    "id": "clopidogrel_interactions",
+    "drug": "Clopidogrel",
+    "category": "interactions",
+    "text": "Clopidogrel drug interactions: (1) Omeprazole, esomeprazole - PPIs inhibit CYP2C19, reducing clopidogrel activation by 40-50%; may reduce antiplatelet efficacy and increase cardiovascular events; use pantoprazole or rabeprazole instead if PPI needed. (2) Aspirin - dual antiplatelet therapy: used intentionally post-ACS/stent but increases bleeding risk especially GI; balance benefit vs risk. (3) Warfarin - triple antithrombotic therapy; significantly increases major bleeding risk; use only when clearly indicated (e.g., AF + recent stent). (4) NSAIDs - additive bleeding risk. (5) SSRIs - increased bleeding risk via platelet serotonin depletion. (6) CYP2C19 inhibitors (fluconazole, fluvoxamine, fluoxetine) - reduce clopidogrel activation; consider alternative antiplatelet. (7) Morphine - delays and reduces clopidogrel absorption via delayed gastric emptying."
+  },
+  {
+    "id": "furosemide_interactions",
+    "drug": "Furosemide",
+    "category": "interactions",
+    "text": "Furosemide (loop diuretic) drug interactions: (1) ACE inhibitors / ARBs - first-dose hypotension risk; also protect against RAAS overactivation from diuresis; generally used together carefully. (2) NSAIDs (ibuprofen, diclofenac, naproxen) - NSAIDs blunt diuretic effect and antihypertensive action; NSAIDs cause sodium retention via prostaglandin inhibition; severe congestive heart failure may decompensate. (3) Aminoglycosides (gentamicin, amikacin) - additive ototoxicity and nephrotoxicity; major interaction; avoid high-dose combination. (4) Digoxin - furosemide-induced hypokalaemia increases digoxin toxicity risk; monitor potassium and digoxin levels. (5) Lithium - increased lithium levels due to reduced renal clearance with sodium depletion; monitor lithium. (6) Corticosteroids - additive hypokalaemia. (7) Antidiabetics - furosemide can raise blood glucose; monitor. (8) Probenecid - reduces furosemide secretion into tubular lumen, reducing efficacy."
+  },
+  {
+    "id": "general_nsaid_ace_diuretic",
+    "drug": "general",
+    "category": "interactions",
+    "text": "The triple whammy interaction: ACE inhibitor (or ARB) + NSAID + diuretic combination significantly increases acute kidney injury risk. Each drug reduces renal perfusion via different mechanisms: ACEi/ARB dilates efferent arteriole reducing GFR; NSAID inhibits prostaglandin-mediated afferent arteriole dilation; diuretic reduces circulating volume. Together they can precipitate acute kidney injury especially in elderly, dehydrated, or those with pre-existing chronic kidney disease. NSAIDs to avoid with cardiac medications include ibuprofen, naproxen, diclofenac, and indomethacin. Safer analgesic alternatives: paracetamol (acetaminophen) is preferred in cardiac and renal patients."
+  },
+  {
+    "id": "general_anticoagulant_bleeding",
+    "drug": "general",
+    "category": "interactions",
+    "text": "Anticoagulant and antiplatelet bleeding risk interactions: Combinations that markedly increase major bleeding risk: (1) Warfarin + aspirin: 3-5x increased GI bleed risk. (2) Warfarin + NSAID (ibuprofen, naproxen): major GI bleed and intracranial bleed risk. (3) Warfarin + clopidogrel: high bleeding risk, use only when clearly indicated. (4) Triple therapy (warfarin + aspirin + clopidogrel): very high bleed risk, avoid unless absolutely necessary post-stent in AF. (5) DOAC + NSAID: increased bleeding. (6) Heparin + aspirin: additive. Gastroprotection with PPI is essential whenever anticoagulants are combined with antiplatelet agents or NSAIDs. Preferred PPI with clopidogrel: pantoprazole or rabeprazole (not omeprazole/esomeprazole due to CYP2C19)."
+  },
+  {
+    "id": "general_renal_impairment_dosing",
+    "drug": "general",
+    "category": "dosing",
+    "text": "Drugs requiring renal dose adjustment (chronic kidney disease / renal impairment): (1) Metformin: contraindicated if eGFR < 30. (2) Amoxicillin: reduce dose if CrCl < 30. (3) Digoxin: reduce dose significantly; narrow therapeutic index; half-life extends dramatically in renal failure. (4) Gabapentin/Pregabalin: substantial dose reduction required. (5) Methotrexate: avoid if eGFR < 30-40. (6) NSAIDs (ibuprofen, naproxen): avoid if eGFR < 30; nephrotoxic. (7) Low-molecular-weight heparins (enoxaparin): reduce dose or switch to UFH if CrCl < 30. (8) Allopurinol: reduce dose. (9) Atenolol, bisoprolol: reduce dose. (10) Acyclovir, valacyclovir: dose reduction. NSAIDs and nephrotoxic antibiotics (aminoglycosides) should be avoided in CKD."
+  },
+  {
+    "id": "general_pregnancy_drugs",
+    "drug": "general",
+    "category": "safety",
+    "text": "Drug safety in pregnancy - key clinical knowledge: CONTRAINDICATED in pregnancy: (1) Warfarin - embryopathy, fetal haemorrhage; use LMWH heparin instead. (2) ACE inhibitors (lisinopril, enalapril) in 2nd/3rd trimester - fetal renal failure, oligohydramnios, limb defects. (3) Statins (atorvastatin, simvastatin) - teratogenic. (4) NSAIDs in 3rd trimester - premature closure of ductus arteriosus, renal impairment. (5) Methotrexate - teratogenic, abortifacient. (6) Tetracyclines - fetal bone/teeth staining. RELATIVELY SAFE: (1) Paracetamol (acetaminophen) - analgesic of choice. (2) Amoxicillin - penicillins generally safe (category B). (3) Metformin - used in gestational diabetes. (4) Beta-blockers (labetalol) - used for hypertension in pregnancy. (5) Low-dose aspirin - used for pre-eclampsia prevention after 12 weeks."
+  },
+  {
+    "id": "paracetamol_overview",
+    "drug": "Paracetamol",
+    "category": "overview",
+    "text": "Paracetamol (acetaminophen) is an analgesic and antipyretic with poorly understood mechanism, possibly involves COX-3 inhibition and activation of descending serotonergic pathways. Unlike NSAIDs, it has minimal anti-inflammatory effect and does not inhibit platelet aggregation. First-line analgesic/antipyretic preferred in renal impairment, elderly, pregnancy, and patients on anticoagulants. Brand names: Panadol, Tylenol, Calpol. Adult dose: 500mg-1g every 4-6 hours, maximum 4g/day (2g/day in hepatic impairment, elderly, or alcohol excess). Overdose: hepatotoxicity via toxic NAPQI metabolite; treat with N-acetylcysteine."
+  },
+  {
+    "id": "paracetamol_interactions",
+    "drug": "Paracetamol",
+    "category": "interactions",
+    "text": "Paracetamol drug interactions: (1) Warfarin - paracetamol at regular doses (>2g/day for several days) can potentiate warfarin effect and raise INR via inhibition of clotting factor synthesis; monitor INR, use minimum effective dose. (2) Alcohol - chronic heavy alcohol use induces CYP2E1, creating more toxic NAPQI metabolite; hepatotoxicity at lower paracetamol doses; avoid >2g/day in alcohol excess. (3) Isoniazid - may increase hepatotoxicity risk via CYP2E1 induction. (4) Carbamazepine, phenytoin, rifampicin - induce CYP enzymes, increase NAPQI formation, potential hepatotoxicity at standard doses. (5) Cholestyramine - reduces paracetamol absorption; separate doses by 2 hours. Unlike NSAIDs, paracetamol does NOT interact with antihypertensives, diuretics, or platelet function."
+  },
+  {
+    "id": "amlodipine_interactions",
+    "drug": "Amlodipine",
+    "category": "interactions",
+    "text": "Amlodipine (calcium channel blocker) drug interactions: (1) Simvastatin - FDA recommends limiting simvastatin to 20 mg/day when combined with amlodipine due to increased myopathy risk (amlodipine weakly inhibits CYP3A4; switch to atorvastatin or rosuvastatin). (2) CYP3A4 inhibitors (clarithromycin, itraconazole, ritonavir) - increase amlodipine exposure; monitor for hypotension. (3) CYP3A4 inducers (rifampicin, carbamazepine) - reduce amlodipine levels, possible reduced antihypertensive effect. (4) Beta-blockers - additive antihypertensive and heart rate effects; generally safe combination, rarely causes excessive bradycardia. (5) Cyclosporine - amlodipine can increase cyclosporine levels; monitor trough levels. (6) Tacrolimus - increased tacrolimus levels reported. (7) Sildenafil/tadalafil - additive hypotension, especially with nitrates; caution."
+  }
+]

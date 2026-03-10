@@ -1,6 +1,7 @@
 ﻿import streamlit as st
 import time
 from datetime import datetime
+import rag_engine as _rag
 
 
 #  Page Configuration (must be the first Streamlit call) 
@@ -166,6 +167,20 @@ html, body, [class*="css"] {
 /*  Hide Streamlit chrome  */
 #MainMenu, footer { visibility: hidden; }
 header            { display: none !important; }
+
+/*  AI typing indicator  */
+.typing-dots { display: flex; align-items: center; gap: 5px; padding: 4px 0; }
+.typing-dots span {
+    display: inline-block; width: 9px; height: 9px;
+    border-radius: 50%; background: #1A6B8A;
+    animation: td-bounce 1.3s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.22s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.44s; }
+@keyframes td-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
+    40%           { transform: translateY(-7px); opacity: 1; }
+}
 </style>
 """
 
@@ -220,31 +235,137 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     """
     import ollama as _ollama
     import re as _re
+    # ----------------------------------------------------------------
+    # 1. NON-ENGLISH GUARD
+    # ----------------------------------------------------------------
+    import re as _re2
+    if _re2.search(r'[\u0600-\u06FF\u0750-\u077F\u4E00-\u9FFF\u3040-\u30FF\u0400-\u04FF\u0900-\u097F]', user_message):
+        return (
+            "I only understand English. "
+            "Please rephrase your question in English and I will be happy to help."
+        )
+
+    # ----------------------------------------------------------------
+    # 2. QUERY REWRITING  (spell-correct + expand + context injection)
+    # ----------------------------------------------------------------
+    # 2a. Drug name spell-correction dictionary
+    _SPELL = {
+        "amoxicllin": "amoxicillin", "amoxicilin": "amoxicillin",
+        "amoxiciline": "amoxicillin", "amoxycillin": "amoxicillin",
+        "ibeprofen": "ibuprofen", "ibuprofin": "ibuprofen",
+        "ibupropen": "ibuprofen", "brufen": "ibuprofen",
+        "omeprazol": "omeprazole", "omeprzaole": "omeprazole",
+        "warfrin": "warfarin", "warfarine": "warfarin", "wafarin": "warfarin",
+        "metformine": "metformin", "metformine": "metformin",
+        "atorvastatin": "atorvastatin", "atrovastatin": "atorvastatin",
+        "aspirine": "aspirin", "asprin": "aspirin",
+        "paracetamole": "paracetamol", "paracetamole": "paracetamol",
+        "amlodipin": "amlodipine", "amlodipine": "amlodipine",
+        "lisinopril": "lisinopril",
+        "clopidogrel": "clopidogrel", "clopidorel": "clopidogrel",
+    }
+    _rewritten = user_message.lower()
+    for _misspell, _correct in _SPELL.items():
+        if _misspell in _rewritten:
+            user_message = _re2.sub(
+                r'\b' + _re2.escape(_misspell) + r'\b',
+                _correct, user_message, flags=_re2.IGNORECASE
+            )
+
+    # 2b. Query expansion  map terse clinical shorthand to full clinical phrases
+    _EXPAND = [
+        (r'\b(ckd|chronic kidney disease|renal failure|renal impairment)\b',
+         'chronic kidney disease (renal impairment, CKD)'),
+        (r'\brenal (dose|dosing)\b', 'renal dosage adjustment'),
+        (r'\bhepatic (dose|dosing)\b', 'hepatic dosage adjustment'),
+        (r'\bcheck interactions?\b', 'check drug-drug interactions'),
+        (r'\bside effects?\b', 'adverse effects and side effects'),
+        (r'\bpregnancy\b', 'use in pregnancy (safety, FDA category)'),
+        (r'\belderly|geriatric\b', 'use in elderly patients (geriatric dosing)'),
+        (r'\bpeds|paediatric|pediatric\b', 'paediatric dosing'),
+        (r'\binr\b', 'INR (International Normalised Ratio) coagulation monitoring'),
+        (r'\bddis?\b', 'drug-drug interactions'),
+    ]
+    for _pat, _replacement in _EXPAND:
+        user_message = _re2.sub(_pat, _replacement, user_message, flags=_re2.IGNORECASE)
+
+    # 2c. Context injection  if a prescription was scanned, inject drug list
+    #     when the query looks like a generic interaction/check request
+    _ocr = st.session_state.get("ocr_result")
+    _meds = _ocr.get("medications", []) if _ocr else []
+    _GENERIC_PATTERNS = [
+        r'\bcheck (drug[-\s]?)?interactions?\b',
+        r'\binteractions? (for|of|in) (the )?(active |current |scanned )?(prescription|rx|meds|medications)\b',
+        r'\bwhat (are|about) (the )?interactions?\b',
+        r'\bany interactions?\b',
+        r'\binteractions? check\b',
+    ]
+    if _meds and any(_re2.search(p, user_message, _re2.IGNORECASE) for p in _GENERIC_PATTERNS):
+        _med_list = ", ".join(_meds)
+        user_message = (
+            f"Check drug-drug interactions between the following medications "
+            f"from the active prescription: {_med_list}. "
+            f"Highlight any major or moderate interactions and clinical significance."
+        )
+
+    # -- 3. RAG RETRIEVAL from ChromaDB --
+    _HOST = st.session_state.get("ol_host", "http://localhost:11434")
+    _rag_chunks = []
+    try:
+        _rag_chunks = _rag.retrieve(user_message, n_results=3, host=_HOST)
+    except Exception:
+        _rag_chunks = []
+    augmented_query = _rag.build_rag_prompt(user_message, _rag_chunks) if _rag_chunks else user_message
+    st.session_state["last_citations"] = _rag.format_citations(_rag_chunks) if _rag_chunks else ""
+
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
     _SYS   = st.session_state.get(
         "ol_system_prompt",
-        "You are an expert clinical pharmacist assistant. Provide concise, "
-        "evidence-based responses. Always recommend consulting a licensed "
-        "pharmacist or physician for patient-specific clinical decisions.",
+        "You are a clinical pharmacist AI. Answer questions directly and concisely."
+        " RULES: 1. NEVER start your reply with a self-introduction."
+        " Go straight to the answer. 2. Answer drug interaction, dosage,"
+        " and safety questions immediately. Do NOT ask for patient demographics"
+        " unless the question is specifically about patient-specific dosing."
+        " 3. Always respond in English regardless of the input language."
+        " 4. End each answer with a one-line disclaimer to consult a licensed pharmacist.",
     )
     try:
         client = _ollama.Client(host=_HOST)
-        # Build full ChatML conversation string
+        # Build ChatML string.
+        # BioMistral expects: system -> user -> assistant -> user -> ...
+        # The chat_history may start with the UI welcome (assistant before any user).
+        # Including that breaks the expected turn order and causes empty / looping output.
+        # Fix: skip all history entries that appear before the first user message.
         parts = [f"<|im_start|>system\n{_SYS}\n<|im_end|>"]
+        first_user_seen = False
         for m in chat_history:
+            if m["role"] == "user":
+                first_user_seen = True
+            if not first_user_seen:
+                continue  # skip UI-only greeting lines before first real user message
+            if not m.get("content", "").strip():
+                continue  # skip empty messages
             parts.append(f"<|im_start|>{m['role']}\n{m['content']}\n<|im_end|>")
-        parts.append(f"<|im_start|>user\n{user_message}\n<|im_end|>")
+        parts.append(f"<|im_start|>user\n{augmented_query}\n<|im_end|>")
         parts.append("<|im_start|>assistant\n")
         full_prompt = "\n".join(parts)
         resp = client.generate(
             model=_MODEL,
             prompt=full_prompt,
             raw=True,
-            options={"num_predict": 1024, "temperature": 0.7},
+            options={"num_predict": 1024, "temperature": 0.3, "repeat_penalty": 1.2, "num_gpu": 0},
         )
         # Strip any trailing <|im_end|> the model may emit
         answer = _re.sub(r"<\|im_end\|>.*$", "", resp.response, flags=_re.DOTALL).strip()
+        # Strip any echoed instruction markers the model may parrot back
+        answer = _re.sub(r"^\[LANGUAGE[^\]]*\][^\n]*\n?", "", answer, flags=_re.IGNORECASE).strip()
+        if not answer:
+            return (
+                "⚠️ The model returned an empty response.\n\n"
+                "This usually means Ollama is running but the model is still loading. "
+                "Please wait 30 seconds and try again."
+            )
         return answer
     except Exception as exc:
         return (
@@ -418,6 +539,11 @@ if "chat_history" not in st.session_state:
 
 if "ocr_result" not in st.session_state:
     st.session_state.ocr_result = None
+
+if "last_citations" not in st.session_state:
+    st.session_state["last_citations"] = ""
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
 
 
 # 
@@ -739,28 +865,33 @@ elif active_page == "Prescription Scanner":
                     import json as _jj
                     _raw = st.session_state.ocr_result.get("extracted_text", "")
                     refined = _llm_fn(_raw)
-                    try:
-                        llm_data = _jj.loads(refined)
-                        if "medications" in llm_data:
-                            _meds = llm_data["medications"]
-                            st.session_state.ocr_result["parsed_meds"] = [
-                                {"name": m.get("drug",""), "dose": m.get("dose",""),
-                                 "unit": m.get("unit",""), "sig": m.get("sig","")}
-                                for m in _meds
-                            ]
-                            st.session_state.ocr_result["medications"] = [
-                                (m.get("drug","") + " " + m.get("dose","") + m.get("unit","")).strip()
-                                for m in _meds
-                            ]
-                            for _fk, _sk in (("patient","patient"),("prescriber","prescriber")):
-                                if llm_data.get(_fk):
-                                    st.session_state.ocr_result[_sk] = llm_data[_fk]
-                            st.success(u"✅ BioMistral refined the prescription!")
+                    if refined == _raw:
+                        st.error("❌ BioMistral did not respond — check Ollama is running (`ollama serve`) and the model is loaded.")
+                    else:
+                        try:
+                            llm_data = _jj.loads(refined)
+                            if "medications" in llm_data:
+                                _meds = llm_data["medications"]
+                                st.session_state.ocr_result["parsed_meds"] = [
+                                    {"name": m.get("drug",""), "dose": m.get("dose",""),
+                                     "unit": m.get("unit",""), "sig": m.get("sig","")}
+                                    for m in _meds
+                                ]
+                                st.session_state.ocr_result["medications"] = [
+                                    (m.get("drug","") + " " + m.get("dose","") + m.get("unit","")).strip()
+                                    for m in _meds
+                                ]
+                                for _fk, _sk in (("patient","patient"),("prescriber","prescriber")):
+                                    if llm_data.get(_fk):
+                                        st.session_state.ocr_result[_sk] = llm_data[_fk]
+                                st.success(u"✅ BioMistral refined the prescription!")
+                                st.rerun()
+                            else:
+                                st.warning(u"⚠️ BioMistral returned JSON but no medications found.")
+                        except Exception:
+                            st.info(u"ℹ️ BioMistral returned non-JSON text — see updated notes below.")
+                            st.session_state.ocr_result["extracted_text"] = refined
                             st.rerun()
-                    except Exception:
-                        st.info(u"ℹ BioMistral returned plain text (not JSON) — raw text updated.")
-                        st.session_state.ocr_result["extracted_text"] = refined
-                        st.rerun()
 
             if st.button("🔎  Check Drug Interactions", use_container_width=True):
                 with st.spinner("Querying interaction database..."):
@@ -820,6 +951,12 @@ elif active_page == "Drug Interaction Chat":
         "dosing, and contraindications</div>",
         unsafe_allow_html=True,
     )
+    st.markdown(
+        "<div class='custom-alert alert-info' style='padding:0.55rem 1rem; font-size:0.82rem;'>"
+        " <strong>English only:</strong> This assistant only understands English. "  
+        "Questions in other languages will not be answered.</div>",
+        unsafe_allow_html=True,
+    )
 
     # Prescription context banner
     if st.session_state.ocr_result:
@@ -845,39 +982,56 @@ elif active_page == "Drug Interaction Chat":
                 st.session_state.chat_history.append(
                     {"role": "user", "content": suggestion}
                 )
-                with st.spinner("Assistant is thinking..."):
-                    resp = query_ollama_llm(suggestion, st.session_state.chat_history)
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "content": resp}
-                )
+                st.session_state.pending_input = suggestion
                 st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    #  Chat history 
+    #  Chat history + optimistic pending indicator 
     chat_box = st.container(height=460)
     with chat_box:
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    #  Input bar 
+        # Immediately show typing dots, then call LLM and replace with response
+        if st.session_state.get("last_citations"):
+            with st.expander("📖 Sources from knowledge base", expanded=False):
+                st.markdown(st.session_state["last_citations"])
+
+        if st.session_state.get("pending_input"):
+            with st.chat_message("assistant"):
+                st.markdown(
+                    "<div class='typing-dots'>"
+                    "<span></span><span></span><span></span>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+            _q = st.session_state.pending_input
+            st.session_state.pending_input = None
+            llm_resp = query_ollama_llm(_q, st.session_state.chat_history)
+            if llm_resp:
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": llm_resp}
+                )
+            st.rerun()
+
+    #  Input bar   append user msg immediately, set pending, rerun to show dots
     if user_input := st.chat_input(
         "Ask about interactions, dosages, contraindications, adverse effects..."
     ):
         st.session_state.chat_history.append({"role": "user", "content": user_input})
-        with st.spinner("Consulting clinical knowledge base..."):
-            llm_resp = query_ollama_llm(user_input, st.session_state.chat_history)
-        st.session_state.chat_history.append({"role": "assistant", "content": llm_resp})
+        st.session_state.pending_input = user_input
         st.rerun()
 
     #  Clear button 
     col_clr, _ = st.columns([1, 5])
     with col_clr:
-        if st.button("🗑️  Clear Chat"):
+        if st.button("  Clear Chat"):
             st.session_state.chat_history = [
                 {"role": "assistant", "content": "Chat cleared. How can I assist you?"}
             ]
+            st.session_state.pending_input = None
             st.rerun()
 
 
@@ -1051,7 +1205,10 @@ elif active_page == "Settings":
                 "You are an expert clinical pharmacist assistant specialising in drug safety, "
                 "pharmacokinetics, and drug-drug interactions. Provide concise, evidence-based "
                 "responses. Always recommend consulting a licensed pharmacist or physician for "
-                "patient-specific clinical decisions."
+                "patient-specific clinical decisions. "
+                "IMPORTANT: Detect the language of the user's message and reply in the SAME language. "
+                "If the user writes in Arabic, respond fully in Arabic (use proper medical Arabic terminology). "
+                "If the user writes in English, respond in English."
             ),
             height=110,
             key="ol_system_prompt",

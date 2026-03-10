@@ -286,10 +286,15 @@ def _refine_with_llm(raw_text: str, host: str = "http://localhost:11434") -> str
         content = _re.sub(r"<\|im_end\|>.*$", "", resp.response, flags=_re.DOTALL).strip()
         # Strip markdown fences if model adds them anyway
         content = _re.sub(r"^```[a-z]*\n|\n?```$", "", content, flags=_re.DOTALL).strip()
-        _j.loads(content)  # validate; raises ValueError if not proper JSON
-        return content
+        # Extract JSON block even if model adds surrounding explanation
+        _jm = _re.search(r"\{.*\}", content, _re.DOTALL)
+        if _jm:
+            content = _jm.group(0).strip()
+        return content  # caller (app.py) handles JSON parsing
+    except (_ollama.ResponseError, ConnectionError, OSError):
+        return raw_text  # Ollama offline - signal unchanged to caller
     except Exception:
-        return raw_text  # graceful fallback
+        return raw_text  # any other error
 
 
 
