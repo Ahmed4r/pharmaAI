@@ -21,6 +21,11 @@ try:
 except ImportError:
     RAG_ENGINE_AVAILABLE = False
 
+try:
+    from database import init_db as _init_db
+    _init_db()
+except Exception:
+    pass
 
 # --- Page Configuration (must be the first Streamlit call) ---
 st.set_page_config(
@@ -318,39 +323,61 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     )
     _is_clinical = bool(_CLINICAL_RE.search(_msg)) or len(_msg.split()) >= 6
 
-    # 3. RAG retrieval
+   # 3. RAG retrieval (Enhanced Logic)
     _rag_block = ""
     rag_chunks = []
     if _is_clinical and RAG_ENGINE_AVAILABLE:
         try:
-            rag_chunks = retrieve(_msg, n_results=3)
-            if rag_chunks and rag_chunks[0].get("score", 0) >= 0.50: # Threshold lowered for better reading
-                _refs = [
-                    "[{drug}]\n{text}".format(
-                        drug=c.get("drug", "").upper(), text=c["text"]
-                    )
-                    for c in rag_chunks
-                ]
-                _rag_block = "\n\nVERIFIED CLINICAL REFERENCES:\n" + "\n\n".join(_refs)
+            # توسيع استعلام البحث لضمان جلب بيانات القصور الكلوي والجرعات
+            # تم إضافة كلمات مفتاحية (Dose, Adjustment, CrCl, Renal) لرفع دقة الـ Vector Search
+            clinical_search_query = f"{_msg} renal dose adjustment creatinine clearance crcl impairment"
+            
+            # رفعنا عدد النتائج لـ 5 لضمان تغطية الجداول الموجودة في عمق المستند
+            rag_chunks = retrieve(clinical_search_query, n_results=5) 
+            
+            if rag_chunks:
+                # ترتيب النتائج بناءً على درجة التشابه (Score)
+                scored_chunks = [c for c in rag_chunks if c.get("score", 0) >= 0.40] # عتبة قبول مرنة
+                
+                if scored_chunks:
+                    _refs = [
+                        "[{drug}] (Relevance: {score:.2f})\n{text}".format(
+                            drug=c.get("drug", "").upper(), 
+                            score=c.get("score", 0),
+                            text=c["text"]
+                        )
+                        for c in scored_chunks
+                    ]
+                    _rag_block = "\n\nVERIFIED CLINICAL REFERENCES FOR DOSE ADJUSTMENT:\n" + "\n\n".join(_refs)
         except Exception as _re_err:
             print(f"RAG error: {_re_err}")
 
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
 
-    # 4. System prompt
     # 4. System prompt (تم تعديله لإزالة العناوين الرقمية)
     if _is_clinical:
-        _SYS = (
-           "You are a Clinical Pharmacist Specialist. Your goal is to analyze the synergy between medications.\n"
-            "When a combination like Aspirin and Warfarin is mentioned, you MUST:\n"
-            "- Explain the separate mechanism of EACH drug clearly.\n"
-            "- Explain the 'Pharmacodynamic Interaction' (how they work together to increase bleeding risk).\n"
-            "- Detail the specific receptors or enzymes involved (e.g., COX-1, TXA2, Vitamin K Epoxide Reductase).\n"
-            "- List clinical red flags for the patient (e.g., Melena, Hematemesis, Petechiae).\n"
-            "- Provide actionable pharmacist recommendations (e.g., PPI co-prescription, INR monitoring).\n"
-            "DO NOT use numbered lists. Use professional, flowing paragraphs.\n"
+      _SYS = (
+        "You are an experienced Clinical Pharmacist working in a community pharmacy.\n"
+        "Your task is to perform a professional medication safety review.\n\n"
 
+        "You must analyze the following aspects when drugs are mentioned:\n"
+
+        "• Drug mechanism of action\n"
+        "• Drug–drug interactions (pharmacodynamic and pharmacokinetic)\n"
+        "• Dose safety and common dosing ranges\n"
+        "• Renal dose adjustments if kidney impairment is mentioned\n"
+        "• Major side effects and contraindications\n"
+        "• Clinical red flag symptoms patients must watch for\n"
+        "• Monitoring recommendations (labs, INR, BP, glucose etc.)\n\n"
+
+        "You MUST prioritize the verified clinical references provided below.\n"
+        "If the answer is not present in the references say: "
+        "'Insufficient verified evidence in database.'\n\n"
+
+        "Write in professional clinical pharmacist language.\n"
+        "Do NOT invent drug doses.\n"
+        "Avoid numbered lists. Use clear structured paragraphs.\n"
         ) + _rag_block
     else:
        _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely."
@@ -358,10 +385,16 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     # 5. Build prompt (شيلنا الـ Seed اللي كان بيجبره يبدأ بـ 1.)
     if _is_clinical:
        full_prompt = (
-            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
-            f"As a pharmacist, provide an in-depth clinical analysis of the interaction between: {_msg} [/INST]\n"
-            f"answer : </s>"
-        )
+           f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
+           f"Patient medication question:\n{_msg}\n\n"
+           "Provide a pharmacist clinical review of the medications mentioned."
+           "Explain interactions, safety issues, dosing considerations and monitoring."
+           "Use the references if available.\n"
+           "[/INST]"
+)
+
+    else:
+        full_prompt = f"<s>[INST] {_msg} [/INST]"
 
     # 6. Generate
     try:
@@ -372,7 +405,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
             raw=True, 
             options={
                 "num_predict": 1500,
-                "temperature": 0.3, # Increased slightly to prevent early stopping
+                "temperature": 0.3, # Increased slightly to prevent early stopping كان 0.3
                 "top_p":       0.9,
                 "num_ctx":     2048,
                 "num_gpu":     20
@@ -476,7 +509,7 @@ def lookup_drug_info(drug_name: str) -> dict:
                                   "Infectious mononucleosis (risk of widespread maculopapular rash)"],
             "side_effects":      ["Diarrhoea", "Nausea", "Skin rash",
                                   "Hypersensitivity reactions (rare: anaphylaxis)"],
-            "dosage":            "250500 mg every 8 h  or  500875 mg every 12 h (adult dose)",
+            "dosage":            "250-500 mg every 8 h  or  500-875 mg every 12 h (adult dose)",
             "pregnancy_category":"B",
             "renal_adjustment":  "Required when CrCl < 30 mL/min",
         },
@@ -496,7 +529,7 @@ def lookup_drug_info(drug_name: str) -> dict:
             "side_effects":      ["GI irritation / dyspepsia", "Headache",
                                   "Elevated blood pressure", "Fluid retention",
                                   "Prolonged bleeding time"],
-            "dosage":            "200800 mg per dose every 48 h (max 3 200 mg/day adult)",
+            "dosage":            "200-800 mg per dose every 4-8 h (max 3200 mg/day adult)",
             "pregnancy_category":"C  (D in 3rd trimester)",
             "renal_adjustment":  "Avoid in severe renal impairment (eGFR < 30)",
         },
@@ -515,7 +548,7 @@ def lookup_drug_info(drug_name: str) -> dict:
             "side_effects":      ["Headache", "Nausea", "Abdominal pain",
                                   "Long-term (>1 yr): hypomagnesaemia, C. difficile risk, "
                                   "vitamin B12 deficiency"],
-            "dosage":            "2040 mg once daily before breakfast",
+            "dosage":            "20-40 mg once daily before breakfast",
             "pregnancy_category":"C",
             "renal_adjustment":  "No dose adjustment required",
         },
@@ -1003,7 +1036,7 @@ elif active_page == "Drug Interaction Chat":
     st.markdown("**Suggested queries:**")
     sc1, sc2, sc3 = st.columns(3)
     suggestions = [
-        ("sc1", sc1, "Check interactions for the active prescription"),
+        ("sc1", sc1, "Check interactions for aspirin+warfarin"),
         ("sc2", sc2, "Contraindications of Ibuprofen?"),
         ("sc3", sc3, "Amoxicillin dose in renal failure?"),
     ]
