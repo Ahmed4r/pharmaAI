@@ -322,37 +322,37 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
                 "temperature": 0.1,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 2048,
+                "max_output_tokens": 4096,
                 "response_mime_type": "application/json",
             },
         )
 
         _prompt = (
-            "You are an expert Egyptian Clinical Pharmacist specializing in reading "
-            "handwritten Arabic and English prescriptions.\n\n"
-            "YOUR TASK: Carefully scan every line of this prescription image and extract "
-            "each medication entry. A medication entry typically has:\n"
-            "  - Drug name (may be handwritten in Arabic or English)\n"
-            "  - Dosage amount (e.g. 5ml, 4 drops, 1 sachet, 1 tablet)\n"
-            "  - Frequency (e.g. once daily, twice daily, before meals)\n\n"
-            "STRICT RULES:\n"
-            "1. Transcribe drug names EXACTLY as written on the paper, letter by letter.\n"
-            "2. For Arabic drug names: write the phonetic English transliteration first, "
-            "then the original Arabic in parentheses. E.g. 'Sanso Immune (سانسو إيميون)'.\n"
-            "3. For dosage: extract the QUANTITY and UNIT written on the paper "
-            "(e.g. '5 ml', '4 drops', '1 sachet', '1 tablet'). If no quantity is written, "
-            "put null.\n"
-            "4. For frequency: write the exact timing/instructions written on paper.\n"
-            "5. NEVER substitute a drug name with a known brand that sounds similar.\n"
-            "6. If a word is unclear, mark uncertain=true and write your best reading.\n"
-            "7. Ignore circular rubber stamps and watermarks.\n"
-            "8. Return ONLY compact single-line JSON, no newlines inside values.\n\n"
+            "You are an expert Egyptian Clinical Pharmacist. Read this handwritten "
+            "prescription image completely.\n\n"
+            "STEP 1  Read the full prescription image carefully, including all "
+            "handwritten text in Arabic and/or English.\n"
+            "STEP 2  For each medication line extract:\n"
+            "  name: the drug name exactly as written (letter by letter). If written in "
+            "Arabic, write the phonetic English first, then Arabic in parentheses.\n"
+            "  dosage: the AMOUNT written (e.g. '5 ml', '4 drops', '1 sachet'). If "
+            "written in Arabic like 'خمس سم' still extract it as '5 ml'. NEVER put null "
+            "unless truly nothing is written next to the drug.\n"
+            "  frequency: ALL timing/instructions written (Arabic or English). E.g. "
+            "'مرة يوميا', 'twice daily', 'قبل الوجبات'. NEVER put null unless truly "
+            "nothing is written.\n"
+            "  uncertain: true only if the handwriting is completely unreadable.\n\n"
+            "RULES:\n"
+            "- Do NOT substitute drug names. Write exactly what is on the paper.\n"
+            "- Do NOT put null for dosage or frequency if text appears near the drug.\n"
+            "- Ignore circular stamps and watermarks.\n"
+            "- Return ONLY a single compact JSON line, no newlines inside values.\n\n"
             "JSON SCHEMA:\n"
             "{\"patient\":\"string or null\","
             "\"date\":\"YYYY-MM-DD or null\","
             "\"prescriber\":\"doctor name + specialty or null\","
             "\"doctor_specialty\":\"specialty or null\","
-            "\"medications\":[{\"name\":\"string\",\"dosage\":\"quantity+unit or null\",\"frequency\":\"string or null\",\"uncertain\":false}],"
+            "\"medications\":[{\"name\":\"string\",\"dosage\":\"string or null\",\"frequency\":\"string or null\",\"uncertain\":false}],"
             "\"confidence_score\":0.0}"
         )
 
