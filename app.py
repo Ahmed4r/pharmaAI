@@ -195,30 +195,53 @@ html, body, [class*="css"] {
 .sev-moderate { background: #FFF8E1; color: #BF6000; }
 .sev-major    { background: #FFEBEE; color: #C62828; }
 
-/* Drawer panel */
-.drawer-panel {
+/* Left-side drawer overlay */
+#pharma-drawer-backdrop {
+    display: none;
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0,0,0,0.32);
+    z-index: 9998;
+}
+#pharma-drawer {
+    position: fixed; top: 0; left: 0;
+    width: 292px; height: 100vh;
     background: #fff;
-    border-radius: 16px;
-    padding: 1.5rem 1.6rem;
-    box-shadow: 0 4px 32px rgba(11,60,93,0.13);
-    border: 1px solid #CFE2F3;
-    margin-bottom: 1.5rem;
-    animation: slideDown 0.22s ease;
+    box-shadow: 4px 0 28px rgba(11,60,93,0.18);
+    z-index: 9999;
+    padding: 1.6rem 1.4rem 2rem;
+    transform: translateX(-100%);
+    transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+    overflow-y: auto;
 }
-@keyframes slideDown {
-    from { opacity: 0; transform: translateY(-12px); }
-    to   { opacity: 1; transform: translateY(0); }
+#pharma-drawer.open { transform: translateX(0); }
+#pharma-drawer-toggle {
+    position: fixed;
+    top: 50vh; left: 0;
+    transform: translateY(-50%);
+    background: #0B3C5D;
+    color: #fff;
+    border: none; cursor: pointer;
+    padding: 0.85rem 0.45rem;
+    border-radius: 0 8px 8px 0;
+    font-size: 1.15rem;
+    z-index: 9997;
+    box-shadow: 2px 0 10px rgba(11,60,93,0.22);
+    transition: background 0.15s, box-shadow 0.15s;
+    line-height: 1;
 }
-.feature-card {
+#pharma-drawer-toggle:hover { background: #1A6B8A; box-shadow: 2px 0 14px rgba(26,107,138,0.3); }
+.dr-card {
     display: flex; align-items: center;
+    text-decoration: none !important;
     background: #F8FBFD; border: 1px solid #e0eef8;
-    border-radius: 10px; padding: 0.75rem 1rem; margin: 0.35rem 0;
+    border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 0.5rem;
     transition: background 0.15s, box-shadow 0.15s;
 }
-.feature-card:hover { background: #E3F2FD; box-shadow: 0 2px 8px rgba(11,60,93,0.08); }
-.feature-card .fc-icon { font-size: 1.4rem; margin-right: 0.8rem; flex-shrink: 0; }
-.feature-card .fc-title { font-weight: 600; font-size: 0.88rem; color: #0B3C5D; }
-.feature-card .fc-sub { font-size: 0.73rem; color: #6B8CAE; margin-top: 0.1rem; }
+.dr-card:hover { background: #E3F2FD; box-shadow: 0 2px 8px rgba(11,60,93,0.08); }
+.dr-icon { font-size: 1.35rem; margin-right: 0.8rem; flex-shrink: 0; }
+.dr-title { font-weight: 600; font-size: 0.9rem; color: #0B3C5D; display: block; }
+.dr-sub   { font-size: 0.72rem; color: #6B8CAE; }
 
 /* Scrollbar */
 ::-webkit-scrollbar       { width: 5px; }
@@ -962,6 +985,17 @@ if "drawer_open" not in st.session_state:
 st.markdown(CLINICAL_CSS, unsafe_allow_html=True)
 
 
+
+# Handle ?nav= from left-drawer links
+try:
+    _qnav = st.query_params.get("nav")
+    _QP_PAGES = ["Dashboard", "Prescription Scanner", "Drug Interaction Chat", "Drug Lookup", "Settings"]
+    if _qnav and _qnav in _QP_PAGES:
+        st.session_state["nav_page"] = _qnav
+        st.query_params.clear()
+except Exception:
+    pass
+
 # --- SIDEBAR ---
 
 with st.sidebar:
@@ -1037,48 +1071,51 @@ with st.sidebar:
 
 
 
-# --- GLOBAL DRAWER ---
-_hdr_col, _drw_col = st.columns([8, 1])
-with _drw_col:
-    if st.button(u"☰", key="drawer_toggle", help="All Features", use_container_width=True):
-        st.session_state.drawer_open = not st.session_state.drawer_open
-        st.rerun()
+# --- GLOBAL LEFT DRAWER (HTML/CSS/JS overlay) ---
+st.markdown(r"""
+<div id="pharma-drawer-backdrop" onclick="pharmaCloseDrawer()"></div>
 
-if st.session_state.drawer_open:
-    st.markdown("<div class='drawer-panel'>", unsafe_allow_html=True)
-    st.markdown(
-        "<b style='font-size:1.05rem; color:#0B3C5D;'>🧭 All Features</b>"
-        "&emsp;<span style='font-size:0.75rem; color:#6B8CAE;'>Select a section to navigate</span>",
-        unsafe_allow_html=True,
-    )
-    st.divider()
-    _fc1, _fc2 = st.columns(2)
-    _FEATURES = [
-        (u"🏠", "Dashboard",             "Metrics & activity feed"),
-        (u"📋", "Prescription Scanner",  "OCR + drug extraction"),
-        (u"💬", "Drug Interaction Chat", "AI clinical pharmacist"),
-        (u"🔍", "Drug Lookup",           "Search drug profiles"),
-        (u"⚙️",  "Settings",           "Configure connections & API keys"),
-    ]
-    for _idx, (_ficon, _ftitle, _fsub) in enumerate(_FEATURES):
-        _fcol = _fc1 if _idx % 2 == 0 else _fc2
-        with _fcol:
-            st.markdown(
-                f"<div class='feature-card'>"
-                f"<span class='fc-icon'>{_ficon}</span>"
-                f"<div><div class='fc-title'>{_ftitle}</div>"
-                f"<div class='fc-sub'>{_fsub}</div></div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            if st.button(f"Open {_ftitle}", key=f"drw_{_idx}", use_container_width=True):
-                st.session_state.drawer_open = False
-                st.session_state["nav_page"] = _ftitle
-                st.rerun()
-    if st.button(u"✕  Close drawer", key="drawer_close"):
-        st.session_state.drawer_open = False
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+<div id="pharma-drawer">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.9rem;">
+    <span style="font-size:1.08rem;font-weight:700;color:#0B3C5D;">&#129517; All Features</span>
+    <button onclick="pharmaCloseDrawer()" style="background:none;border:none;cursor:pointer;font-size:1.5rem;color:#6B8CAE;padding:0;line-height:1;">&#215;</button>
+  </div>
+  <hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">
+  <a href="?nav=Dashboard" class="dr-card">
+    <span class="dr-icon">&#127968;</span>
+    <span><span class="dr-title">Dashboard</span><span class="dr-sub">Metrics &amp; activity feed</span></span>
+  </a>
+  <a href="?nav=Prescription Scanner" class="dr-card">
+    <span class="dr-icon">&#128203;</span>
+    <span><span class="dr-title">Prescription Scanner</span><span class="dr-sub">OCR + drug extraction</span></span>
+  </a>
+  <a href="?nav=Drug Interaction Chat" class="dr-card">
+    <span class="dr-icon">&#128172;</span>
+    <span><span class="dr-title">Drug Interaction Chat</span><span class="dr-sub">AI clinical pharmacist</span></span>
+  </a>
+  <a href="?nav=Drug Lookup" class="dr-card">
+    <span class="dr-icon">&#128269;</span>
+    <span><span class="dr-title">Drug Lookup</span><span class="dr-sub">Search drug profiles</span></span>
+  </a>
+  <a href="?nav=Settings" class="dr-card">
+    <span class="dr-icon">&#9881;&#65039;</span>
+    <span><span class="dr-title">Settings</span><span class="dr-sub">Configure connections &amp; API keys</span></span>
+  </a>
+</div>
+
+<button id="pharma-drawer-toggle" onclick="pharmaOpenDrawer()" title="All Features">&#9776;</button>
+
+<script>
+function pharmaOpenDrawer() {
+  document.getElementById('pharma-drawer').classList.add('open');
+  document.getElementById('pharma-drawer-backdrop').style.display='block';
+}
+function pharmaCloseDrawer() {
+  document.getElementById('pharma-drawer').classList.remove('open');
+  document.getElementById('pharma-drawer-backdrop').style.display='none';
+}
+</script>
+""", unsafe_allow_html=True)
 
 # --- PAGE: DASHBOARD ---
 
