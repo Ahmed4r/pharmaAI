@@ -270,136 +270,152 @@ def preprocess_prescription_image(image_bytes: bytes) -> bytes:
     except Exception:
         return image_bytes
 
+
 def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png") -> dict:
-    """
-    تحديث نظام الـ OCR للعمل بنظام الخطوة الواحدة (Direct Vision-to-JSON)
-    لزيادة الدقة في قراءة خط اليد الطبي.
-    """
-    import base64
+    """OCR via Google Gemini 1.5 Flash  native JSON mode, Egyptian prescription specialist."""
     import json
     import os as _os
-    import re
 
     try:
-        from groq import Groq as _Groq
+        import google.generativeai as _genai
     except ImportError:
-        return {"status": "error", "error": "groq package not installed"}
+        return {
+            "status": "error", "raw_json": None, "extracted_text": "",
+            "medications": [], "parsed_meds": [], "patient": "", "date": "",
+            "prescriber": "", "dea": "", "confidence": 0.0,
+            "interactions": [], "preprocessing": [],
+            "error": "google-generativeai not installed  run: pip install google-generativeai",
+        }
 
     try:
         api_key = (
-            st.session_state.get("groq_api_key", "").strip()
-            or _os.environ.get("GROQ_API_KEY", "")
-            or st.secrets.get("GROQ_API_KEY", "")
+            st.session_state.get("gemini_api_key", "").strip()
+            or _os.environ.get("GEMINI_API_KEY", "")
+            or _os.environ.get("GOOGLE_API_KEY", "")
         )
         if not api_key:
-            raise ValueError("Groq API key not set.")
+            raise ValueError(
+                "Gemini API key not set. Add it in ⚙️ Settings → OCR Engine."
+            )
 
-        # تجهيز الصورة
-        _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
-        _mime = f"image/{'png' if _ext == 'png' else 'jpeg'}"
-        
-        # تعطيل الـ Dewatermark العنيف في الـ preprocessing إذا كان يؤثر على الخط
+        # Pre-process image (deskew, denoise, watermark suppression)
         _do_pp = st.session_state.get("ocr_preprocess", True)
+        _pp_steps: list[str] = []
         if _do_pp:
-            image_bytes = preprocess_prescription_image(image_bytes)
-            _mime = "image/png"
-
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
-        client = _Groq(api_key=api_key)
-
-        # البرومبت الجديد: دمج الاستخراج والتحليل البصري والمنطقي
-        prompt = (
-            "You are an expert Clinical Pharmacist specialized in deciphering messy medical handwriting, "
-            "specifically from Egyptian doctors. The image contains a prescription with mixed Arabic and English.\n\n"
-            "INSTRUCTIONS:\n"
-            "1. Ignore the clinic stamps/watermarks unless they contain the doctor's name.\n"
-            "2. Identify the clinic specialty (e.g., Pediatrics, Endocrinology) to constrain drug name possibilities.\n"
-            "3. Extract EVERY medication. If a name is unclear, use your pharmacological knowledge to find the most likely match "
-            "(e.g., if you see 'Eul...' in a pediatric context, it is likely 'Eulicon').\n"
-            "4. Return ONLY a compact single-line JSON object (no newlines inside string values) with this schema:\n"
-            '{"patient":"name or null","date":"YYYY-MM-DD or null","prescriber":"doctor/specialty",'
-            '"medications":[{"name":"Drug","dosage":"dose","frequency":"instructions","uncertain":false}]}\n'
-            "IMPORTANT: - All string values must be on a single line (escape any newlines as \\n).\n"
-            "           - Return ONLY the JSON  no markdown, no explanation."
-        )
-
-        completion = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{_mime};base64,{b64}"},
-                    },
-                ],
-            }],
-            temperature=0.1, # حرارة منخفضة لضمان الدقة وعدم الهلوسة
-            max_tokens=1024,
-        )
-
-        raw_response = completion.choices[0].message.content.strip()
-
-        # Robust JSON extraction: try 3 strategies then repair
-        parsed = None
-        _json_err = None
-        # Strategy 1: direct parse
-        try:
-            parsed = json.loads(raw_response)
-        except json.JSONDecodeError:
-            pass
-        # Strategy 2: strip markdown fences
-        if parsed is None:
-            _fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_response, re.DOTALL)
-            if _fence:
-                try:
-                    parsed = json.loads(_fence.group(1))
-                except json.JSONDecodeError as e:
-                    _json_err = e
-        # Strategy 3: greedy regex + repair literal newlines inside string values
-        if parsed is None:
-            json_match = re.search(r"(\{.*\})", raw_response, re.DOTALL)
-            if not json_match:
-                raise ValueError("Model did not return a JSON object.")
-            _raw_json = json_match.group(1)
-            # Replace literal newlines inside quoted strings with \n escape
-            def _fix_nl(m):
-                return m.group(0).replace("\n", "\\n").replace("\r", "")
-            _raw_json = re.sub(r'"[^"]*"(?=\s*[:,\]}])', _fix_nl, _raw_json)
             try:
-                parsed = json.loads(_raw_json)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"JSON parse failed after repair: {e}  Raw: {_raw_json[:300]}") from e
-        if parsed is None:
-            raise ValueError("Could not parse model response as JSON.")
-        
-        # استكمال البيانات للـ UI
-        medications = parsed.get("medications", [])
-        med_names = [f"{m.get('name')} {m.get('dosage')}".strip() for m in medications]
+                _orig_len = len(image_bytes)
+                image_bytes = preprocess_prescription_image(image_bytes)
+                if len(image_bytes) != _orig_len:
+                    _pp_steps = ["Upscale", "Deskew", "CLAHE", "Bilateral", "Sharpen", "Dewatermark"]
+            except Exception:
+                pass
 
-        # فحص التفاعلات الدوائية (Interaction Check)
-        interactions = []
+        # Determine MIME type for Gemini
+        _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
+        _mime = "image/png" if (_do_pp or _ext == "png") else f"image/{'jpeg' if _ext in ('jpg','jpeg') else _ext}"
+
+        # Configure Gemini
+        _genai.configure(api_key=api_key)
+        _model = _genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config={
+                "temperature": 0.1,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
+            },
+        )
+
+        _prompt = (
+            "You are an expert Egyptian Clinical Pharmacist specializing in deciphering "
+            "handwritten prescriptions. Analyze this prescription image carefully.\n\n"
+            "INSTRUCTIONS:\n"
+            "1. Ignore rubber stamps or circular watermarks unless they contain the doctor name.\n"
+            "2. The prescription may contain Arabic and/or English  read both.\n"
+            "3. Identify the clinic specialty (e.g., Pediatrics, Endocrinology, Cardiology) "
+            "to constrain likely drug names.\n"
+            "4. Extract EVERY medication. For unclear names use clinical reasoning "
+            "(e.g., partial drug name + specialty context = most likely brand).\n"
+            "5. Return ONLY a single-line compact JSON with NO embedded newlines in values.\n\n"
+            "REQUIRED JSON SCHEMA:\n"
+            "{\"patient\":\"name or null\","
+            "\"date\":\"YYYY-MM-DD or null\","
+            "\"prescriber\":\"doctor name and specialty\","
+            "\"doctor_specialty\":\"detected specialty\","
+            "\"medications\":["
+            "{\"name\":\"Brand\",\"dosage\":\"strength\",\"frequency\":\"instructions\",\"uncertain\":false}"
+            "],"
+            "\"confidence_score\":0.0}"
+        )
+
+        _response = _model.generate_content([
+            _prompt,
+            {"mime_type": _mime, "data": image_bytes},
+        ])
+
+        parsed = json.loads(_response.text)
+
+        medications = parsed.get("medications", [])
+        med_names = [
+            (str(m.get("name", "")) + " " + str(m.get("dosage", ""))).strip()
+            for m in medications
+        ]
+
+        # Drug interaction check
+        interactions: list = []
         if med_names and INTERACTION_CHECKER_AVAILABLE:
-            clean_names = [m.get("name", "").split()[0] for m in medications]
-            interactions = check_interactions(clean_names)
+            _drug_names = [m.get("name", "").split()[0] for m in medications if m.get("name")]
+            interactions = check_interactions(_drug_names)
+
+        # Log to DB
+        try:
+            from database import log_event as _le
+            _le("prescription_scanned", {
+                "drug_count": len(medications),
+                "drugs": med_names,
+                "patient": parsed.get("patient", ""),
+            })
+        except Exception:
+            pass
 
         return {
-            "status": "success",
-            "raw_json": parsed,
-            "extracted_text": parsed.get("raw_transcription", ""),
-            "medications": med_names,
-            "parsed_meds": medications,
-            "patient": parsed.get("patient", ""),
-            "date": parsed.get("date", ""),
-            "prescriber": parsed.get("prescriber", ""),
-            "interactions": interactions,
-            "preprocessing": ["Native Vision-to-JSON", "Llama-4-Scout"]
+            "status":        "success",
+            "raw_json":      parsed,
+            "extracted_text": parsed.get("prescriber", "") + " | " + ", ".join(
+                m.get("name", "") for m in medications
+            ),
+            "medications":   med_names,
+            "parsed_meds":   medications,
+            "patient":       parsed.get("patient", "") or "",
+            "date":          parsed.get("date", "") or "",
+            "prescriber":    parsed.get("prescriber", "") or "",
+            "dea":           "",
+            "confidence":    float(parsed.get("confidence_score", 1.0)),
+            "interactions":  interactions,
+            "preprocessing": (_pp_steps + ["Gemini 1.5 Flash", "JSON Mode"]),
         }
 
     except Exception as exc:
-        return {"status": "error", "error": str(exc)}
-def analyze_prescription_safety(parsed_meds: list, patient: str = "",prescriber: str = "") -> dict:
+        return {
+            "status":        "error",
+            "raw_json":      None,
+            "extracted_text": "",
+            "medications":   [],
+            "parsed_meds":   [],
+            "patient":       "",
+            "date":          "",
+            "prescriber":    "",
+            "dea":           "",
+            "confidence":    0.0,
+            "interactions":  [],
+            "preprocessing": [],
+            "error":         f"OCR failed: {exc}",
+        }
+
+
+def analyze_prescription_safety(parsed_meds: list, patient: str = "",
+                                 prescriber: str = "") -> dict:
     """Run Groq safety analysis: dosing errors, interactions, frequency alerts.
     UI labels this as Tesseract.js; backend uses meta-llama/llama-4-scout-17b-16e-instruct.
     """
@@ -483,7 +499,6 @@ def analyze_prescription_safety(parsed_meds: list, patient: str = "",prescriber:
     except Exception as exc:
         return {"status": "error", "error": str(exc),
                 "dosing_errors": [], "interactions": [], "frequency_alerts": [], "summary": ""}
-
 
 def send_n8n_alert(webhook_url: str, payload: dict) -> bool:
     """POST a safety-alert payload to an n8n webhook. Returns True on 2xx/3xx."""
@@ -1034,6 +1049,9 @@ if "pending_input" not in st.session_state:
 
 if "groq_api_key" not in st.session_state:
     st.session_state.groq_api_key = _os.environ.get("GROQ_API_KEY", "")
+
+if "gemini_api_key" not in st.session_state:
+    st.session_state.gemini_api_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
 
 if "ocr_edited" not in st.session_state:
     st.session_state.ocr_edited = {}
@@ -2075,9 +2093,13 @@ elif active_page == "Settings":
 
     # OCR
     with st.expander("🔬  OCR Engine Configuration", expanded=False):
-        st.markdown("**Groq Vision API (prescription OCR)**")
+        st.markdown("**Gemini 1.5 Flash (prescription OCR)**")
+        st.text_input("Gemini API Key", type="password", key="gemini_api_key",
+                      help="Required for prescription scanning. Get yours at aistudio.google.com")
+        st.divider()
+        st.markdown("**Groq Vision API (safety analysis)**")
         st.text_input("Groq API Key", type="password", key="groq_api_key",
-                      help="Required for prescription scanning. Get yours at console.groq.com")
+                      help="Used for drug safety analysis. Get yours at console.groq.com")
         st.divider()
         ocr_engine = st.selectbox(
             "OCR Engine",
