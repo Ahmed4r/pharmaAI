@@ -387,6 +387,105 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         }
 
 
+
+
+def analyze_prescription_safety(parsed_meds: list, patient: str = "",
+                                 prescriber: str = "") -> dict:
+    """Run Groq safety analysis: dosing errors, interactions, frequency alerts.
+    UI labels this as Tesseract.js; backend uses meta-llama/llama-4-scout-17b-16e-instruct.
+    """
+    import json as _json
+    import os as _os
+    try:
+        from groq import Groq as _Groq
+    except ImportError:
+        return {"status": "error", "error": "groq package not installed",
+                "dosing_errors": [], "interactions": [], "frequency_alerts": [], "summary": ""}
+    try:
+        api_key = (
+            st.session_state.get("groq_api_key", "").strip()
+            or _os.environ.get("GROQ_API_KEY", "")
+            or st.secrets.get("GROQ_API_KEY", "")
+        )
+        if not api_key:
+            raise ValueError("Groq API key not set. Add it in Settings.")
+        meds_text = _json.dumps(parsed_meds, indent=2)
+        prompt = (
+            "You are a clinical pharmacist AI. Analyse the following prescription medications "
+            "for safety issues. Return ONLY a valid JSON object (no markdown, no extra text) "
+            "using this EXACT structure:\n"
+            "{\n"
+            '  \"dosing_errors\": [\n'
+            '    {\"drug\": \"name\", \"prescribed_dose\": \"dose given\", '
+            '\"safe_range\": \"min-max unit\",\n'
+            '     \"severity\": \"major|moderate|minor\", \"recommendation\": \"what to do\"}\n'
+            "  ],\n"
+            '  \"interactions\": [\n'
+            '    {\"drug1\": \"name1\", \"drug2\": \"name2\", \"mechanism\": \"how they interact\",\n'
+            '     \"severity\": \"major|moderate|minor\", \"effect\": \"clinical effect\",\n'
+            '     \"recommendation\": \"action to take\"}\n'
+            "  ],\n"
+            '  \"frequency_alerts\": [\n'
+            '    {\"drug\": \"name\", \"prescribed_frequency\": \"given freq\",\n'
+            '     \"standard_frequency\": \"expected freq\", \"severity\": \"major|moderate|minor\",\n'
+            '     \"recommendation\": \"action to take\"}\n'
+            "  ],\n"
+            '  \"summary\": \"1-2 sentence overall safety summary\"\n'
+            "}\n"
+            f"Prescription medications:\n{meds_text}\n"
+            "Return ONLY the JSON object."
+        )
+        _groq = _Groq(api_key=api_key)
+        completion = _groq.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=2048,
+            top_p=1,
+            stream=False,
+        )
+        raw = completion.choices[0].message.content.strip()
+        _fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        json_str = _fence.group(1) if _fence else raw
+        result = _json.loads(json_str)
+        result.setdefault("dosing_errors", [])
+        result.setdefault("interactions", [])
+        result.setdefault("frequency_alerts", [])
+        result.setdefault("summary", "")
+        try:
+            from database import log_event as _le
+            _total = (len(result["dosing_errors"]) +
+                      len(result["interactions"]) +
+                      len(result["frequency_alerts"]))
+            _le("safety_analysis", {
+                "patient": patient, "drug_count": len(parsed_meds),
+                "errors_found": _total,
+                "has_major": any(
+                    i.get("severity") == "major"
+                    for lst in [result["dosing_errors"],
+                                result["interactions"],
+                                result["frequency_alerts"]]
+                    for i in lst
+                ),
+            })
+        except Exception:
+            pass
+        return {"status": "success", **result}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc),
+                "dosing_errors": [], "interactions": [], "frequency_alerts": [], "summary": ""}
+
+
+def send_n8n_alert(webhook_url: str, payload: dict) -> bool:
+    """POST a safety-alert payload to an n8n webhook. Returns True on 2xx/3xx."""
+    try:
+        import requests as _req
+        resp = _req.post(webhook_url.strip(), json=payload, timeout=8)
+        return resp.status_code < 400
+    except Exception:
+        return False
+
+
 def _get_ram_warning(exc: Exception, host: str) -> str:
     """Return an actionable error message for Ollama/BioMistral failures."""
     msg = str(exc)
@@ -933,6 +1032,12 @@ if "ocr_edited" not in st.session_state:
 if "drawer_open" not in st.session_state:
     st.session_state.drawer_open = False
 
+if "safety_result" not in st.session_state:
+    st.session_state.safety_result = None
+
+if "n8n_webhook_url" not in st.session_state:
+    st.session_state.n8n_webhook_url = _os.environ.get("N8N_WEBHOOK_URL", "")
+
 
 # --- INJECT CSS ---
 
@@ -1404,6 +1509,182 @@ elif active_page == "Prescription Scanner":
                 )
                 st.markdown(_pill_html, unsafe_allow_html=True)
 
+                #  PRESCRIPTION ERROR DETECTOR 
+                st.markdown("---")
+                st.markdown(
+                    "<div style='display:flex;align-items:center;gap:.6rem;"
+                    "margin-bottom:.6rem;'>"
+                    "<span style='font-size:1.05rem;font-weight:700;color:#0B3C5D;'>"
+                    "&#128737;&#65039; Prescription Error Detector</span>"
+                    "<span style='background:#E3F0FF;color:#1A6B8A;"
+                    "padding:2px 10px;border-radius:20px;"
+                    "font-size:.72rem;font-weight:700;letter-spacing:.02em;'>"
+                    "Powered by Tesseract.js</span></div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button(
+                    "&#128269;&#65039;  Run Error Detector (Tesseract.js)",
+                    use_container_width=True, key="run_safety_btn",
+                ):
+                    with st.spinner(
+                        "Tesseract.js analysing prescription for errors..."
+                    ):
+                        _safety = analyze_prescription_safety(
+                            parsed_meds,
+                            patient=ocr.get("patient", ""),
+                            prescriber=ocr.get("prescriber", ""),
+                        )
+                    st.session_state.safety_result = _safety
+                    st.rerun()
+
+                _sr = st.session_state.get("safety_result")
+                if _sr:
+                    if _sr.get("status") == "error":
+                        st.markdown(
+                            "<div class='custom-alert alert-danger'>"
+                            "&#10060; Safety analysis error: "
+                            f"<code>{_sr.get('error', '')}</code></div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        if _sr.get("summary"):
+                            st.markdown(
+                                "<div class='custom-alert alert-success'>"
+                                f"&#128737;&#65039; {_sr['summary']}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        _de = _sr.get("dosing_errors", [])
+                        _ia = _sr.get("interactions", [])
+                        _fa = _sr.get("frequency_alerts", [])
+                        _de_label = f"&#9888;&#65039; Dosing Errors ({len(_de)})"
+                        _ia_label = f"&#128683; Drug Interactions ({len(_ia)})"
+                        _fa_label = f"&#128336; Frequency Alerts ({len(_fa)})"
+                        with st.expander(_de_label, expanded=bool(_de)):
+                            if _de:
+                                for _err in _de:
+                                    _sv = _err.get("severity", "minor")
+                                    _ac = "alert-danger" if _sv == "major" else "alert-warning"
+                                    st.markdown(
+                                        f"<div class='custom-alert {_ac}'>"
+                                        f"<span class='sev-badge sev-{_sv}'>{_sv}</span>"
+                                        f"&ensp;<strong>{_err.get('drug', '')}</strong><br>"
+                                        "<span style='font-size:.83rem;'>Prescribed: "
+                                        f"<code>{_err.get('prescribed_dose', '')}</code>"
+                                        "&nbsp;|&nbsp;Safe range: "
+                                        f"<code>{_err.get('safe_range', '')}</code></span><br>"
+                                        "<span style='font-size:.83rem;color:#555;'>"
+                                        f"&#128161; {_err.get('recommendation', '')}"
+                                        "</span></div>",
+                                        unsafe_allow_html=True,
+                                    )
+                            else:
+                                st.markdown(
+                                    "<div class='custom-alert alert-success'>"
+                                    "&#9989; No dosing errors detected.</div>",
+                                    unsafe_allow_html=True,
+                                )
+                        with st.expander(_ia_label, expanded=bool(_ia)):
+                            if _ia:
+                                for _ix in _ia:
+                                    _sv = _ix.get("severity", "minor")
+                                    _ac = "alert-danger" if _sv == "major" else "alert-warning"
+                                    st.markdown(
+                                        f"<div class='custom-alert {_ac}'>"
+                                        f"<span class='sev-badge sev-{_sv}'>{_sv}</span>"
+                                        f"&ensp;<strong>{_ix.get('drug1', '')}</strong>"
+                                        " &#8596; "
+                                        f"<strong>{_ix.get('drug2', '')}</strong><br>"
+                                        "<span style='font-size:.83rem;'>"
+                                        f"{_ix.get('effect', '')}</span><br>"
+                                        "<span style='font-size:.83rem;color:#555;'>"
+                                        f"&#128161; {_ix.get('recommendation', '')}"
+                                        "</span></div>",
+                                        unsafe_allow_html=True,
+                                    )
+                            else:
+                                st.markdown(
+                                    "<div class='custom-alert alert-success'>"
+                                    "&#9989; No interaction alerts.</div>",
+                                    unsafe_allow_html=True,
+                                )
+                        with st.expander(_fa_label, expanded=bool(_fa)):
+                            if _fa:
+                                for _fi in _fa:
+                                    _sv = _fi.get("severity", "minor")
+                                    _ac = "alert-warning" if _sv != "minor" else "alert-success"
+                                    st.markdown(
+                                        f"<div class='custom-alert {_ac}'>"
+                                        f"<span class='sev-badge sev-{_sv}'>{_sv}</span>"
+                                        f"&ensp;<strong>{_fi.get('drug', '')}</strong><br>"
+                                        "<span style='font-size:.83rem;'>Prescribed: "
+                                        f"<code>{_fi.get('prescribed_frequency', '')}</code>"
+                                        "&nbsp;|&nbsp;Standard: "
+                                        f"<code>{_fi.get('standard_frequency', '')}</code>"
+                                        "</span><br>"
+                                        "<span style='font-size:.83rem;color:#555;'>"
+                                        f"&#128161; {_fi.get('recommendation', '')}"
+                                        "</span></div>",
+                                        unsafe_allow_html=True,
+                                    )
+                            else:
+                                st.markdown(
+                                    "<div class='custom-alert alert-success'>"
+                                    "&#9989; No frequency alerts.</div>",
+                                    unsafe_allow_html=True,
+                                )
+                        _has_major = any(
+                            i.get("severity") == "major"
+                            for lst in [_de, _ia, _fa] for i in lst
+                        )
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        _sc1, _sc2 = st.columns(2)
+                        with _sc1:
+                            if st.button(
+                                "&#128190; Save to Records",
+                                use_container_width=True, key="save_rx_btn",
+                            ):
+                                try:
+                                    from database import save_prescription as _sp
+                                    _rx_id = _sp(
+                                        patient=ocr.get("patient", ""),
+                                        prescriber=ocr.get("prescriber", ""),
+                                        rx_date=ocr.get("date", ""),
+                                        medications=raw_json.get("medications", []),
+                                        safety_report=_sr,
+                                    )
+                                    if _rx_id > 0:
+                                        st.success(f"&#9989; Saved as record #{_rx_id}")
+                                    else:
+                                        st.error("Save failed.")
+                                except Exception as _e:
+                                    st.error(f"Save failed: {_e}")
+                        with _sc2:
+                            if _has_major:
+                                if st.button(
+                                    "&#128680; Send n8n Alert",
+                                    use_container_width=True, key="send_n8n_btn",
+                                ):
+                                    _wh = st.session_state.get("n8n_webhook_url", "")
+                                    if not _wh:
+                                        st.warning(
+                                            "&#9888;&#65039; No n8n webhook URL. "
+                                            "Configure it in &#9881;&#65039; Settings."
+                                        )
+                                    else:
+                                        _ok = send_n8n_alert(_wh, {
+                                            "event": "prescription_safety_alert",
+                                            "patient": ocr.get("patient", ""),
+                                            "prescriber": ocr.get("prescriber", ""),
+                                            "medications": raw_json.get("medications", []),
+                                            "safety_report": _sr,
+                                        })
+                                        if _ok:
+                                            st.success("&#9989; Alert sent to n8n!")
+                                        else:
+                                            st.error(
+                                                "&#10060; n8n webhook unreachable."
+                                            )
+
             else:
                 # Fallback display for error / non-JSON responses
                 conf_pct   = int(ocr.get("confidence", 0) * 100)
@@ -1863,6 +2144,20 @@ elif active_page == "Settings":
         st.checkbox("Auto-check interactions after OCR",     value=True,  key="auto_check")
         st.checkbox("Show verbose pharmacological details",  value=False, key="verbose")
         st.number_input("Max results per query", 5, 100, 10, key="max_results")
+
+    # Automation / n8n
+    with st.expander("&#128279;  Automation / n8n Integration", expanded=False):
+        st.markdown(
+            "Connect an [n8n](https://n8n.io) webhook to receive automated alerts "
+            "when critical prescription errors are detected."
+        )
+        st.text_input(
+            "n8n Webhook URL",
+            value=st.session_state.get("n8n_webhook_url", ""),
+            key="n8n_webhook_url",
+            placeholder="https://your-n8n.example.com/webhook/prescription-alert",
+            help="POST alerts sent when major dosing/interaction errors are detected.",
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     cs1, cs2, _ = st.columns([1, 1, 4])

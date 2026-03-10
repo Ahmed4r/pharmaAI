@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS activity_log (
 
 CREATE INDEX IF NOT EXISTS idx_log_event ON activity_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_log_time  ON activity_log(created_at);
+
+CREATE TABLE IF NOT EXISTS prescriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient      TEXT    DEFAULT '',
+    prescriber   TEXT    DEFAULT '',
+    rx_date      TEXT    DEFAULT '',
+    medications  TEXT    DEFAULT '[]',
+    safety_report TEXT   DEFAULT '{}',
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rx_patient ON prescriptions(patient);
+CREATE INDEX IF NOT EXISTS idx_rx_time    ON prescriptions(created_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -563,6 +576,25 @@ def get_recent_logs(n: int = 12) -> list:
     except Exception:
         return []
 
+
+
+def save_prescription(patient: str, prescriber: str, rx_date: str,
+                      medications: list, safety_report: dict) -> int:
+    """Insert a prescription record and return the new row id. Returns -1 on error."""
+    try:
+        conn = get_connection()
+        cur  = conn.execute(
+            "INSERT INTO prescriptions (patient, prescriber, rx_date, medications, safety_report) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (patient or "", prescriber or "", rx_date or "",
+             json.dumps(medications), json.dumps(safety_report)),
+        )
+        conn.commit()
+        row_id = cur.lastrowid
+        conn.close()
+        return row_id
+    except Exception:
+        return -1
 
 if __name__ == "__main__":
     init_db()
