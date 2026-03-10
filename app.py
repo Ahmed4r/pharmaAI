@@ -2,6 +2,15 @@ import re
 import streamlit as st
 import time
 from datetime import datetime
+import os as _os
+
+# Load .env file (local dev)  must run before any os.environ reads
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(override=False)  # does NOT overwrite already-set env vars
+except ImportError:
+    pass  # python-dotenv optional; env vars may be set another way
+
 
 # Import custom modules
 try:
@@ -239,6 +248,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         api_key = (
             st.session_state.get("groq_api_key", "").strip()
             or _os.environ.get("GROQ_API_KEY", "")
+            or st.secrets.get("GROQ_API_KEY", "")
         )
         if not api_key:
             raise ValueError(
@@ -913,7 +923,7 @@ if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 
 if "groq_api_key" not in st.session_state:
-    st.session_state.groq_api_key = ""
+    st.session_state.groq_api_key = "REMOVED_SECRET"
 
 if "ocr_edited" not in st.session_state:
     st.session_state.ocr_edited = {}
