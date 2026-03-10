@@ -361,7 +361,54 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
             {"mime_type": _mime, "data": image_bytes},
         ])
 
-        parsed = json.loads(_response.text)
+        # Robust JSON extraction: handle fences, truncation, trailing commas
+        _raw = _response.text.strip()
+        parsed = None
+        _errors = []
+
+        # Strategy 1: direct parse
+        try:
+            parsed = json.loads(_raw)
+        except Exception as e1:
+            _errors.append(str(e1))
+
+        # Strategy 2: strip markdown fences then parse
+        if parsed is None:
+            import re as _re
+            _fenced = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", _raw, _re.DOTALL)
+            if _fenced:
+                try:
+                    parsed = json.loads(_fenced.group(1))
+                except Exception as e2:
+                    _errors.append(str(e2))
+
+        # Strategy 3: greedy brace extraction + repair
+        if parsed is None:
+            _start = _raw.find("{")
+            _end = _raw.rfind("}")
+            if _start != -1:
+                _candidate = _raw[_start:(_end + 1 if _end != -1 else len(_raw))]
+                # Remove trailing commas before } or ]
+                _candidate = _re.sub(r",\s*([}\]])", r"\1", _candidate)
+                # If string is still unterminated, close it
+                try:
+                    parsed = json.loads(_candidate)
+                except Exception:
+                    # Try completing truncated JSON
+                    _opens = _candidate.count("{") - _candidate.count("}")
+                    _arr   = _candidate.count("[") - _candidate.count("]")
+                    # close any open string, array, object
+                    if _candidate.rstrip()[-1] not in ('"', '}', ']'):
+                        _candidate += '"'
+                    _candidate += "]" * max(0, _arr) + "}" * max(0, _opens)
+                    try:
+                        parsed = json.loads(_candidate)
+                    except Exception as e3:
+                        _errors.append(str(e3))
+
+        if parsed is None:
+            raise ValueError(f"JSON parse failed after 3 strategies. Raw response snippet: {_raw[:300]!r}. Errors: {_errors}")
+
 
         medications = parsed.get("medications", [])
         med_names = [
