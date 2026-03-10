@@ -317,7 +317,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         # Configure Gemini
         _genai.configure(api_key=api_key)
         _model = _genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-2.0-flash",
             generation_config={
                 "temperature": 0.1,
                 "top_p": 0.95,
