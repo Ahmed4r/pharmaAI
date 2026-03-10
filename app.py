@@ -350,7 +350,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
             "- List clinical red flags for the patient (e.g., Melena, Hematemesis, Petechiae).\n"
             "- Provide actionable pharmacist recommendations (e.g., PPI co-prescription, INR monitoring).\n"
             "DO NOT use numbered lists. Use professional, flowing paragraphs.\n"
-            "LANGUAGE RULE: Respond in Arabic, but keep medical terms and drug names in English."
+
         ) + _rag_block
     else:
        _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely."
@@ -360,7 +360,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
        full_prompt = (
             f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
             f"As a pharmacist, provide an in-depth clinical analysis of the interaction between: {_msg} [/INST]\n"
-            f"التحليل الصيدلاني الإكلينيكي:"
+            f"answer : </s>"
         )
 
     # 6. Generate
