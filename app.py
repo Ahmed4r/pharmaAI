@@ -1,4 +1,4 @@
-﻿import re
+import re
 import streamlit as st
 import time
 from datetime import datetime
@@ -43,7 +43,7 @@ except Exception:
 # --- Page Configuration (must be the first Streamlit call) ---
 st.set_page_config(
     page_title="Smart Drug Safety Assistant",
-    page_icon="ðŸ’Š",
+    page_icon="💊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -252,7 +252,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         )
         if not api_key:
             raise ValueError(
-                "Groq API key not set. Add it in âš™ï¸ Settings â†’ OCR Engine."
+                "Groq API key not set. Add it in ⚙️ Settings → OCR Engine."
             )
 
         _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
@@ -401,7 +401,7 @@ def _get_ram_warning(exc: Exception, host: str) -> str:
     )
     if "system memory" in msg or "allocate" in msg or free_gb < needed_gb:
         return (
-            "**âš ï¸ BioMistral cannot load â€“ not enough free RAM**\n\n"
+            "**⚠️ BioMistral cannot load – not enough free RAM**\n\n"
             + ram_line
             + "**To free RAM, close any of these:**\n"
             "- Browser tabs (Edge/Chrome/Brave)\n"
@@ -411,7 +411,7 @@ def _get_ram_warning(exc: Exception, host: str) -> str:
             f"_Technical: {msg}_"
         )
     return (
-        f"**BioMistral offline** â€“ could not reach Ollama at {host}\n\n"
+        f"**BioMistral offline** – could not reach Ollama at {host}\n\n"
         f"Error: {msg}\n\n"
         "Make sure Ollama is running (ollama serve) and the model is available."
     )
@@ -724,7 +724,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         _major_task = (
             "TASK: Write the full structured interaction report in the exact format "
             "specified in the system prompt. Start immediately with "
-            "'**âš ï¸ MAJOR INTERACTION DETECTED**'. "
+            "'**⚠️ MAJOR INTERACTION DETECTED**'. "
             "Bold all drug names and severity labels. "
             "Under Monitoring, explicitly list: INR frequency, bleeding signs "
             "(bruising, dark stools, prolonged bleeding time). "
@@ -940,7 +940,7 @@ with st.sidebar:
     st.markdown(
         """
         <div style='text-align:center; padding:1.2rem 0 0.6rem;'>
-            <div style='font-size:3rem; line-height:1;'>ðŸ’Š</div>
+            <div style='font-size:3rem; line-height:1;'>💊</div>
             <div style='font-size:1.05rem; font-weight:700; color:#E8F4FD; margin-top:0.5rem;
                         letter-spacing:0.01em;'>
                 Drug Safety Assistant
@@ -960,11 +960,11 @@ with st.sidebar:
     )
 
     _NAV_OPTIONS = [
-        u"ðŸ   Dashboard",
-        u"ðŸ“‹  Prescription Scanner",
-        u"ðŸ’¬  Drug Interaction Chat",
-        u"ðŸ”  Drug Lookup",
-        u"âš™ï¸  Settings",
+        u"🏠  Dashboard",
+        u"📋  Prescription Scanner",
+        u"💬  Drug Interaction Chat",
+        u"🔍  Drug Lookup",
+        u"⚙️  Settings",
     ]
     _NAV_LABELS = [o.split("  ", 1)[-1].strip() for o in _NAV_OPTIONS]
     _nav_target = st.session_state.pop("nav_page", None)
@@ -998,20 +998,20 @@ with st.sidebar:
             <div>{_sdot(RAG_ENGINE_AVAILABLE)}&nbsp;
                 RAG Engine <span style='color:#90C4E0; font-size:0.7rem;'>({'Indexed' if RAG_ENGINE_AVAILABLE else 'Offline'})</span></div>
             <div>{_sdot(True)}&nbsp;
-                Drug DB <span style='color:#90C4E0; font-size:0.7rem;'>(SQLite Â· Live)</span></div>
+                Drug DB <span style='color:#90C4E0; font-size:0.7rem;'>(SQLite · Live)</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.caption(f"v1.0.0  Â·  {datetime.now().strftime('%d %b %Y')}")
+    st.caption(f"v1.0.0  ·  {datetime.now().strftime('%d %b %Y')}")
 
 
 # --- PAGE: DASHBOARD ---
 
 if active_page == "Dashboard":
-    st.markdown("<div class='section-header'>ðŸ  Dashboard</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>🏠 Dashboard</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Clinical drug safety monitoring at a glance</div>",
         unsafe_allow_html=True,
@@ -1025,10 +1025,10 @@ if active_page == "Dashboard":
     except Exception:
         _st = {}
     metrics = [
-        ("ðŸ”¬", f"{_st.get('prescription_scanned', 0):,}",  "Prescriptions Scanned"),
-        ("âš ï¸",  f"{_st.get('interaction_flagged', 0):,}",   "Interactions Flagged"),
-        ("ðŸ’¬", f"{_st.get('query_answered', 0):,}",        "Queries Answered"),
-        ("âœ…", f"{_st.get('safety_compliance', 100.0):.1f}%",  "Safety Compliance"),
+        ("🔬", f"{_st.get('prescription_scanned', 0):,}",  "Prescriptions Scanned"),
+        ("⚠️",  f"{_st.get('interaction_flagged', 0):,}",   "Interactions Flagged"),
+        ("💬", f"{_st.get('query_answered', 0):,}",        "Queries Answered"),
+        ("✅", f"{_st.get('safety_compliance', 100.0):.1f}%",  "Safety Compliance"),
     ]
     for col, (icon, value, label) in zip([mc1, mc2, mc3, mc4], metrics):
         with col:
@@ -1048,10 +1048,10 @@ if active_page == "Dashboard":
     with col_feed:
         st.markdown("#### Recent Activity")
         _LOG_CFG = {
-            "prescription_scanned": ("ðŸ“‹", "info",    "Prescription scanned"),
-            "interaction_flagged":  ("âš ï¸", "warning", "Interaction flagged"),
-            "query_answered":       ("âœ…", "success", "Query answered"),
-            "drug_lookup":          ("ðŸ”", "info",    "Drug lookup"),
+            "prescription_scanned": ("📋", "info",    "Prescription scanned"),
+            "interaction_flagged":  ("⚠️", "warning", "Interaction flagged"),
+            "query_answered":       ("✅", "success", "Query answered"),
+            "drug_lookup":          ("🔍", "info",    "Drug lookup"),
         }
         try:
             from database import get_recent_logs as _grl
@@ -1061,7 +1061,7 @@ if active_page == "Dashboard":
         if _recent:
             for _entry in _recent:
                 _et   = _entry["event_type"]
-                _icon, _lvl, _lbl = _LOG_CFG.get(_et, ("â€¢", "info", _et))
+                _icon, _lvl, _lbl = _LOG_CFG.get(_et, ("•", "info", _et))
                 _meta = _entry.get("metadata", {})
                 _ts   = str(_entry.get("created_at", ""))[-8:-3] or "--:--"
                 if _et == "prescription_scanned":
@@ -1093,15 +1093,15 @@ if active_page == "Dashboard":
 
         with col_actions:
             st.markdown("#### Quick Actions")
-        if st.button(u"ðŸ“‹  Scan New Prescription", use_container_width=True):
+        if st.button(u"📋  Scan New Prescription", use_container_width=True):
             st.session_state["nav_page"] = "Prescription Scanner"
             st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button(u"ðŸ’¬  Open Drug Chat", use_container_width=True):
+        if st.button(u"💬  Open Drug Chat", use_container_width=True):
             st.session_state["nav_page"] = "Drug Interaction Chat"
             st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button(u"ðŸ”  Lookup Drug Profile", use_container_width=True):
+        if st.button(u"🔍  Lookup Drug Profile", use_container_width=True):
             st.session_state["nav_page"] = "Drug Lookup"
             st.rerun()
 
@@ -1145,10 +1145,10 @@ if active_page == "Dashboard":
 elif active_page == "Prescription Scanner":
     _bb, _ = st.columns([1, 7])
     with _bb:
-        if st.button(u"â† Dashboard", key="back_scanner", use_container_width=True):
+        if st.button(u"← Dashboard", key="back_scanner", use_container_width=True):
             st.session_state["nav_page"] = "Dashboard"
             st.rerun()
-    st.markdown("<div class='section-header'>ðŸ“‹ Prescription Scanner</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>📋 Prescription Scanner</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Upload a prescription image for automated OCR extraction "
         "and drug interaction analysis</div>",
@@ -1171,39 +1171,39 @@ elif active_page == "Prescription Scanner":
             try:
                 from PIL import Image as PILImage
                 img = PILImage.open(uploaded_file)
-                st.image(img, caption=f"ðŸ“„ {uploaded_file.name}", use_container_width=True)
+                st.image(img, caption=f"📄 {uploaded_file.name}", use_container_width=True)
             except Exception:
                 st.markdown(
                     "<div class='custom-alert alert-warning'>"
-                    "âš ï¸ Image preview not available for this file type.</div>",
+                    "⚠️ Image preview not available for this file type.</div>",
                     unsafe_allow_html=True,
                 )
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            if st.button("ðŸ”¬  Analyse Prescription", use_container_width=True):
+            if st.button("🔬  Analyse Prescription", use_container_width=True):
                 with st.spinner("Running OCR pipeline  extracting medication data..."):
                     uploaded_file.seek(0)
                     st.session_state.ocr_edited = {}
                     result = process_prescription_ocr(uploaded_file.read(), filename=uploaded_file.name)
                     st.session_state.ocr_result = result
                 if result["status"] == "success":
-                    stages = "  â†’  ".join(result.get("preprocessing", []))
+                    stages = "  →  ".join(result.get("preprocessing", []))
                     st.markdown(
                         "<div class='custom-alert alert-success'>"
-                        "âœ…  OCR complete â€” see results on the right.</div>",
+                        "✅  OCR complete — see results on the right.</div>",
                         unsafe_allow_html=True,
                     )
                     if stages:
                         st.markdown(
                             f"<div style='font-size:.75rem; color:#4A7FA0; margin-top:.3rem;'>"
-                            f"ðŸ”§ Pipeline: <code>{stages}</code></div>",
+                            f"🔧 Pipeline: <code>{stages}</code></div>",
                             unsafe_allow_html=True,
                         )
                 else:
                     st.markdown(
                         "<div class='custom-alert alert-danger'>"
-                        "âŒ OCR engine unavailable â€” showing demo data.<br>"
+                        "❌ OCR engine unavailable — showing demo data.<br>"
                         f"<code style='font-size:.78rem;'>{result.get('error','')}</code>"
                         "</div>",
                         unsafe_allow_html=True,
@@ -1306,7 +1306,7 @@ elif active_page == "Prescription Scanner":
                     _unc_badge = (
                         " <span style='background:#FFF8E1;color:#BF6000;"
                         "padding:1px 7px;border-radius:10px;font-size:.7rem;"
-                        "font-weight:700;'>âš  Uncertain Fields</span>"
+                        "font-weight:700;'>⚠ Uncertain Fields</span>"
                         if _has_unc else ""
                     )
                     st.markdown(
@@ -1320,25 +1320,25 @@ elif active_page == "Prescription Scanner":
                     mc1, mc2, mc3, mc4 = st.columns(4)
                     with mc1:
                         if _nu:
-                            st.text_input("Drug Name âš ", value=_strip_unc(_name),
+                            st.text_input("Drug Name ⚠", value=_strip_unc(_name),
                                           key=f"edit_med_{_mi}_name")
                         else:
                             st.markdown(f"**Drug Name**\n\n{_strip_unc(_name) or '&mdash;'}")
                     with mc2:
                         if _du:
-                            st.text_input("Dosage âš ", value=_strip_unc(_dose),
+                            st.text_input("Dosage ⚠", value=_strip_unc(_dose),
                                           key=f"edit_med_{_mi}_dosage")
                         else:
                             st.markdown(f"**Dosage**\n\n{_strip_unc(_dose) or '&mdash;'}")
                     with mc3:
                         if _fu:
-                            st.text_input("Frequency âš ", value=_strip_unc(_freq),
+                            st.text_input("Frequency ⚠", value=_strip_unc(_freq),
                                           key=f"edit_med_{_mi}_frequency")
                         else:
                             st.markdown(f"**Frequency**\n\n{_strip_unc(_freq) or '&mdash;'}")
                     with mc4:
                         if _uu:
-                            st.text_input("Duration âš ", value=_strip_unc(_dur),
+                            st.text_input("Duration ⚠", value=_strip_unc(_dur),
                                           key=f"edit_med_{_mi}_duration")
                         else:
                             st.markdown(f"**Duration**\n\n{_strip_unc(_dur) or '&mdash;'}")
@@ -1369,7 +1369,7 @@ elif active_page == "Prescription Scanner":
                         for _fk in ("patient", "prescriber", "date"):
                             if _new_ed.get(_fk):
                                 st.session_state.ocr_result[_fk] = _new_ed[_fk]
-                        st.success("âœ… Corrections saved!")
+                        st.success("✅ Corrections saved!")
                         st.rerun()
 
                 st.markdown("---")
@@ -1406,20 +1406,20 @@ elif active_page == "Prescription Scanner":
             #  Interaction warnings 
             if ocr.get("interactions"):
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### âš ï¸ Drug Interaction Warnings")
+                st.markdown("### ⚠️ Drug Interaction Warnings")
                 for _ix in ocr["interactions"]:
                     if INTERACTION_CHECKER_AVAILABLE:
                         st.markdown(format_interaction_alert(_ix), unsafe_allow_html=True)
                     else:
-                        _icon = {"major": "ðŸš«", "moderate": "âš ï¸",
-                                 "minor": "â„¹ï¸"}.get(_ix.get("severity", "minor"), "â€¢")
+                        _icon = {"major": "🚫", "moderate": "⚠️",
+                                 "minor": "ℹ️"}.get(_ix.get("severity", "minor"), "•")
                         st.warning(
                             f"{_icon} {_ix.get('drug1','')} + {_ix.get('drug2','')}: "
                             f"{_ix.get('description','')}"
                         )
 
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("ðŸ”Ž  Check Drug Interactions",
+            if st.button("🔎  Check Drug Interactions",
                          use_container_width=True, key="check_inter_btn"):
                 with st.spinner("Querying interaction database..."):
                     _ixs = check_drug_interactions(ocr.get("medications", []))
@@ -1454,7 +1454,7 @@ elif active_page == "Prescription Scanner":
                 else:
                     st.markdown(
                         "<div class='custom-alert alert-success'>"
-                        "âœ…  No significant interactions detected.</div>",
+                        "✅  No significant interactions detected.</div>",
                         unsafe_allow_html=True,
                     )
         else:
@@ -1463,7 +1463,7 @@ elif active_page == "Prescription Scanner":
                 <div style='text-align:center; padding:3rem 1rem; color:#6B8CAE;
                             background:#fff; border-radius:12px;
                             border: 2px dashed #B0CEE3;'>
-                    <div style='font-size:3rem; margin-bottom:0.75rem;'>ðŸ“‹</div>
+                    <div style='font-size:3rem; margin-bottom:0.75rem;'>📋</div>
                     <div style='font-size:1rem; font-weight:500;'>Awaiting prescription upload</div>
                     <div style='font-size:0.82rem; margin-top:0.35rem;'>
                         Results will appear here after analysis
@@ -1479,11 +1479,11 @@ elif active_page == "Prescription Scanner":
 elif active_page == "Drug Interaction Chat":
     _bb, _ = st.columns([1, 7])
     with _bb:
-        if st.button(u"â† Dashboard", key="back_chat", use_container_width=True):
+        if st.button(u"← Dashboard", key="back_chat", use_container_width=True):
             st.session_state["nav_page"] = "Dashboard"
             st.rerun()
     st.markdown(
-        "<div class='section-header'>ðŸ’¬ Drug Interaction Chat</div>", unsafe_allow_html=True
+        "<div class='section-header'>💬 Drug Interaction Chat</div>", unsafe_allow_html=True
     )
     st.markdown(
         "<div class='section-sub'>Ask the AI pharmacist about drug safety, interactions, "
@@ -1502,7 +1502,7 @@ elif active_page == "Drug Interaction Chat":
         meds_str = ",  ".join(st.session_state.ocr_result["medications"])
         st.markdown(
             f"<div class='custom-alert alert-info'>"
-            f"ðŸ“‹ <strong>Active prescription context:</strong>&nbsp; {meds_str}"
+            f"📋 <strong>Active prescription context:</strong>&nbsp; {meds_str}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -1617,10 +1617,10 @@ elif active_page == "Drug Interaction Chat":
 elif active_page == "Drug Lookup":
     _bb, _ = st.columns([1, 7])
     with _bb:
-        if st.button(u"â† Dashboard", key="back_lookup", use_container_width=True):
+        if st.button(u"← Dashboard", key="back_lookup", use_container_width=True):
             st.session_state["nav_page"] = "Dashboard"
             st.rerun()
-    st.markdown("<div class='section-header'>ðŸ” Drug Lookup</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>🔍 Drug Lookup</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Search comprehensive drug profiles from the clinical database</div>",
         unsafe_allow_html=True,
@@ -1706,14 +1706,14 @@ elif active_page == "Drug Lookup":
 
             st.markdown("**Standard Dosage**")
             st.markdown(
-                f"<div class='custom-alert alert-info'>ðŸ’Š {info['dosage']}</div>",
+                f"<div class='custom-alert alert-info'>💊 {info['dosage']}</div>",
                 unsafe_allow_html=True,
             )
 
             st.markdown("**Renal Dose Adjustment**")
             st.markdown(
                 f"<div class='custom-alert alert-info'>"
-                f"ðŸ«˜ {info.get('renal_adjustment','')}</div>",
+                f"🫘 {info.get('renal_adjustment','')}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1722,7 +1722,7 @@ elif active_page == "Drug Lookup":
             if info["contraindications"]:
                 for ci in info["contraindications"]:
                     st.markdown(
-                        f"<div class='custom-alert alert-danger'>ðŸš« {ci}</div>",
+                        f"<div class='custom-alert alert-danger'>🚫 {ci}</div>",
                         unsafe_allow_html=True,
                     )
             else:
@@ -1732,7 +1732,7 @@ elif active_page == "Drug Lookup":
             if info["side_effects"]:
                 for se in info["side_effects"]:
                     st.markdown(
-                        f"<div class='custom-alert alert-warning'>âš ï¸ {se}</div>",
+                        f"<div class='custom-alert alert-warning'>⚠️ {se}</div>",
                         unsafe_allow_html=True,
                     )
             else:
@@ -1747,17 +1747,17 @@ elif active_page == "Drug Lookup":
 elif active_page == "Settings":
     _bb, _ = st.columns([1, 7])
     with _bb:
-        if st.button(u"â† Dashboard", key="back_settings", use_container_width=True):
+        if st.button(u"← Dashboard", key="back_settings", use_container_width=True):
             st.session_state["nav_page"] = "Dashboard"
             st.rerun()
-    st.markdown("<div class='section-header'>âš™ï¸ Settings</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>⚙️ Settings</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='section-sub'>Configure backend connections and application preferences</div>",
         unsafe_allow_html=True,
     )
 
     # Ollama
-    with st.expander("ðŸ¤–  Ollama LLM Configuration", expanded=True):
+    with st.expander("🤖  Ollama LLM Configuration", expanded=True):
         oc1, oc2 = st.columns(2)
         with oc1:
             st.text_input("Ollama Host", value="http://localhost:11434", key="ol_host")
@@ -1769,7 +1769,7 @@ elif active_page == "Settings":
         with oc2:
             st.slider("Request Timeout (s)", 10, 180, 60, key="ol_timeout")
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("ðŸ”—  Test Ollama Connection", key="ol_test"):
+            if st.button("🔗  Test Ollama Connection", key="ol_test"):
                 with st.spinner("Pinging Ollama service..."):
                     try:
                         import ollama as _ol
@@ -1791,16 +1791,16 @@ elif active_page == "Settings":
                 "mechanism (name the enzyme e.g. CYP2C9), clinical effect, "
                 "dose adjustment needed, and monitoring parameters with frequency. "
                 "Use markdown headers and tables where helpful. "
-                "Flag contraindications with âš ï¸. "
+                "Flag contraindications with ⚠️. "
                 "Respond in the same language the user writes in. "
-                "End every answer with: âš ï¸ Always verify with a licensed pharmacist or prescriber."
+                "End every answer with: ⚠️ Always verify with a licensed pharmacist or prescriber."
             ),
             height=110,
             key="ol_system_prompt_custom",
         )
 
     # OCR
-    with st.expander("ðŸ”¬  OCR Engine Configuration", expanded=False):
+    with st.expander("🔬  OCR Engine Configuration", expanded=False):
         st.markdown("**Groq Vision API (prescription OCR)**")
         st.text_input("Groq API Key", type="password", key="groq_api_key",
                       help="Required for prescription scanning. Get yours at console.groq.com")
@@ -1826,7 +1826,7 @@ elif active_page == "Settings":
         st.checkbox("Pre-process image (deskew, denoise)", value=True, key="ocr_preprocess")
 
     # Drug Database
-    with st.expander("ðŸ’Š  Drug Database Configuration", expanded=False):
+    with st.expander("💊  Drug Database Configuration", expanded=False):
         db_source = st.selectbox(
             "Primary Database",
             ["Local Demo", "RxNorm API (Free)", "DrugBank API", "OpenFDA API (Free)"],
@@ -1837,7 +1837,7 @@ elif active_page == "Settings":
         st.checkbox("Cache API responses (24 h)", value=True, key="db_cache")
 
     # Display Preferences
-    with st.expander("ðŸŽ¨  Display Preferences", expanded=False):
+    with st.expander("🎨  Display Preferences", expanded=False):
         st.checkbox("Show OCR confidence score",             value=True,  key="show_conf")
         st.checkbox("Auto-check interactions after OCR",     value=True,  key="auto_check")
         st.checkbox("Show verbose pharmacological details",  value=False, key="verbose")
@@ -1846,8 +1846,8 @@ elif active_page == "Settings":
     st.markdown("<br>", unsafe_allow_html=True)
     cs1, cs2, _ = st.columns([1, 1, 4])
     with cs1:
-        if st.button("ðŸ’¾  Save Settings", use_container_width=True, key="save_btn"):
+        if st.button("💾  Save Settings", use_container_width=True, key="save_btn"):
             st.success("Settings saved.")
     with cs2:
-        if st.button("â†©ï¸  Reset Defaults", use_container_width=True, key="reset_btn"):
+        if st.button("↩️  Reset Defaults", use_container_width=True, key="reset_btn"):
             st.info("Settings reset to defaults.")
