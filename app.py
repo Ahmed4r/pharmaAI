@@ -298,21 +298,30 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
                 "Gemini API key not set. Add it in ⚙️ Settings → OCR Engine."
             )
 
-        # Pre-process image (deskew, denoise, watermark suppression)
-        _do_pp = st.session_state.get("ocr_preprocess", True)
+        # For Gemini vision: only upscale if too small  no aggressive CV processing
+        # (CLAHE / bilateral / unsharp / deskew distort the image and hurt accuracy)
         _pp_steps: list[str] = []
-        if _do_pp:
-            try:
-                _orig_len = len(image_bytes)
-                image_bytes = preprocess_prescription_image(image_bytes)
-                if len(image_bytes) != _orig_len:
-                    _pp_steps = ["Upscale", "Deskew", "CLAHE", "Bilateral", "Sharpen", "Dewatermark"]
-            except Exception:
-                pass
+        try:
+            import io as _io2, numpy as _np2
+            from PIL import Image as _PILImg2
+            import cv2 as _cv2b
+            _pil2 = _PILImg2.open(_io2.BytesIO(image_bytes)).convert("RGB")
+            _h2, _w2 = _pil2.height, _pil2.width
+            if max(_h2, _w2) < 1600:
+                _scale2 = 1600 / max(_h2, _w2)
+                _bgr2 = _cv2b.cvtColor(_np2.array(_pil2), _cv2b.COLOR_RGB2BGR)
+                _bgr2 = _cv2b.resize(_bgr2, None, fx=_scale2, fy=_scale2,
+                                     interpolation=_cv2b.INTER_LANCZOS4)
+                _buf2 = _io2.BytesIO()
+                _PILImg2.fromarray(_cv2b.cvtColor(_bgr2, _cv2b.COLOR_BGR2RGB)).save(_buf2, format="JPEG", quality=95)
+                image_bytes = _buf2.getvalue()
+                _pp_steps = ["Upscale"]
+        except Exception:
+            pass
 
         # Determine MIME type for Gemini
         _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
-        _mime = "image/png" if (_do_pp or _ext == "png") else f"image/{'jpeg' if _ext in ('jpg','jpeg') else _ext}"
+        _mime = "image/jpeg" if _pp_steps else (f"image/jpeg" if _ext in ("jpg", "jpeg") else f"image/{_ext}")
 
         # Configure Gemini
         _genai.configure(api_key=api_key)
@@ -447,7 +456,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
             "dea":           "",
             "confidence":    float(parsed.get("confidence_score", 1.0)),
             "interactions":  interactions,
-            "preprocessing": (_pp_steps + ["Gemini 2.5 Flash", "JSON Mode"]),
+            "preprocessing": (_pp_steps + ["Gemini 2.5 Flash Vision", "JSON Mode"]),
         }
 
     except Exception as exc:
