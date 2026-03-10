@@ -328,25 +328,29 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         )
 
         _prompt = (
-            "You are an expert Egyptian Clinical Pharmacist specializing in deciphering "
-            "handwritten prescriptions. Analyze this prescription image carefully.\n\n"
-            "INSTRUCTIONS:\n"
-            "1. Ignore rubber stamps or circular watermarks unless they contain the doctor name.\n"
-            "2. The prescription may contain Arabic and/or English  read both.\n"
-            "3. Identify the clinic specialty (e.g., Pediatrics, Endocrinology, Cardiology) "
-            "to constrain likely drug names.\n"
-            "4. Extract EVERY medication. For unclear names use clinical reasoning "
-            "(e.g., partial drug name + specialty context = most likely brand).\n"
-            "5. Return ONLY a single-line compact JSON with NO embedded newlines in values.\n\n"
+            "You are an expert Egyptian Clinical Pharmacist with exceptional ability to read "
+            "handwritten Arabic and English prescriptions. Your ONLY job is to TRANSCRIBE "
+            "exactly what is written  do NOT autocorrect, do NOT substitute drug names, "
+            "do NOT guess based on clinical context.\n\n"
+            "STRICT RULES:\n"
+            "1. TRANSCRIBE drug names character-by-character exactly as written.\n"
+            "2. If a name is in Arabic, phonetically transliterate it to English AND include "
+            "the original Arabic in parentheses. E.g.: 'Sanso Immune (سانسو إيميون)'.\n"
+            "3. For dosage/frequency: write the EXACT words/numbers on the paper.\n"
+            "4. If a field is truly unreadable, set uncertain=true and write the closest "
+            "phonetic approximation of what you see.\n"
+            "5. NEVER replace a written name with a similar-sounding known brand.\n"
+            "6. Ignore rubber stamps or circle watermarks unless they contain the doctor name.\n"
+            "7. Return ONLY a single-line compact JSON with NO embedded newlines in values.\n\n"
             "REQUIRED JSON SCHEMA:\n"
             "{\"patient\":\"name or null\","
             "\"date\":\"YYYY-MM-DD or null\","
-            "\"prescriber\":\"doctor name and specialty\","
-            "\"doctor_specialty\":\"detected specialty\","
+            "\"prescriber\":\"doctor name and specialty or null\","
+            "\"doctor_specialty\":\"detected specialty or null\","
             "\"medications\":["
-            "{\"name\":\"Brand\",\"dosage\":\"strength\",\"frequency\":\"instructions\",\"uncertain\":false}"
+            "{\"name\":\"exact name as written\",\"dosage\":\"exact dosage as written\",\"frequency\":\"exact instructions as written\",\"uncertain\":false}"
             "],"
-            "\"confidence_score\":0.0}"
+            "\"confidence_score\":0.95}"
         )
 
         _response = _model.generate_content([
@@ -393,7 +397,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
             "dea":           "",
             "confidence":    float(parsed.get("confidence_score", 1.0)),
             "interactions":  interactions,
-            "preprocessing": (_pp_steps + ["Gemini 1.5 Flash", "JSON Mode"]),
+            "preprocessing": (_pp_steps + ["Gemini 3.1 Flash Lite", "JSON Mode"]),
         }
 
     except Exception as exc:
@@ -2093,7 +2097,7 @@ elif active_page == "Settings":
 
     # OCR
     with st.expander("🔬  OCR Engine Configuration", expanded=False):
-        st.markdown("**Gemini 1.5 Flash (prescription OCR)**")
+        st.markdown("**Gemini 3.1 Flash Lite Preview (prescription OCR)**")
         st.text_input("Gemini API Key", type="password", key="gemini_api_key",
                       help="Required for prescription scanning. Get yours at aistudio.google.com")
         st.divider()
