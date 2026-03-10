@@ -34,7 +34,8 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 _BASE = Path(__file__).parent
 _KB_PATH   = _BASE / "knowledge_base" / "drugs.json"
-_CHROMA_DIR = _BASE / "knowledge_base" / "chroma_db"
+_CHROMA_DIR    = _BASE / "knowledge_base" / "chroma_db"
+_BRAND_MAP_PATH = _BASE / "knowledge_base" / "brand_map.json"
 
 # ---------------------------------------------------------------------------
 # Lazy singletons
@@ -42,6 +43,7 @@ _CHROMA_DIR = _BASE / "knowledge_base" / "chroma_db"
 _chroma_client     = None
 _collection        = None
 _tfidf_corpus: Optional[list[dict]] = None   # fallback
+_brand_map_cache: Optional[dict] = None        # brand->generic, loaded lazily
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,6 +78,91 @@ def _cosine(a: list[float], b: list[float]) -> float:
 # ---------------------------------------------------------------------------
 # TF-IDF fallback (no external dependencies)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Brand-name -> generic name mapping for query expansion
+# ---------------------------------------------------------------------------
+_BRAND_TO_GENERIC = {
+    "plavix":     "clopidogrel",
+    "crestor":    "rosuvastatin",
+    "lipitor":    "atorvastatin",
+    "norvasc":    "amlodipine",
+    "zocor":      "simvastatin",
+    "coumadin":   "warfarin",
+    "jantoven":   "warfarin",
+    "glucophage": "metformin",
+    "prilosec":   "omeprazole",
+    "losec":      "omeprazole",
+    "nexium":     "esomeprazole",
+    "advil":      "ibuprofen",
+    "motrin":     "ibuprofen",
+    "nurofen":    "ibuprofen",
+    "brufen":     "ibuprofen",
+    "tylenol":    "paracetamol acetaminophen",
+    "panadol":    "paracetamol acetaminophen",
+    "augmentin":  "amoxicillin clavulanate",
+    "amoxil":     "amoxicillin",
+    "lasix":      "furosemide",
+    "zestril":    "lisinopril",
+    "prinivil":   "lisinopril",
+    "ecotrin":    "aspirin salicylate",
+    "aspegic":    "aspirin salicylate",
+    "flagyl":          "metronidazole",
+    "rozex":           "metronidazole",
+    "metro":           "metronidazole",
+    # antihistamines
+    "zyrtec":          "cetirizine cetirizine hydrochloride",
+    "reactine":        "cetirizine cetirizine hydrochloride",
+    "zirtek":          "cetirizine cetirizine hydrochloride",
+    # antipsychotics
+    "zyprexa":         "olanzapine",
+    "zyprexa zydis":   "olanzapine",
+    # benzodiazepines
+    "valium":          "diazepam",
+    "diastat":         "diazepam",
+    # opioids
+    "tylenol codeine": "acetaminophen codeine",
+    "codalgin":        "acetaminophen codeine",
+    # nsaids
+    "naprosyn":        "naproxen",
+    "aleve":           "naproxen",
+    "anaprox":         "naproxen",
+    "naprogesic":      "naproxen",
+}
+
+
+def _load_brand_map() -> dict:
+    """Merge hardcoded _BRAND_TO_GENERIC with knowledge_base/brand_map.json."""
+    merged = dict(_BRAND_TO_GENERIC)
+    if _BRAND_MAP_PATH.exists():
+        try:
+            with open(_BRAND_MAP_PATH, encoding="utf-8") as _f:
+                merged.update(json.load(_f))
+        except Exception:
+            pass
+    return merged
+
+
+def reload_brand_map() -> None:
+    """Force-reload the brand map from disk (call after updating brand_map.json)."""
+    global _brand_map_cache
+    _brand_map_cache = None
+
+
+def _expand_query(query: str) -> str:
+    global _brand_map_cache
+    if _brand_map_cache is None:
+        _brand_map_cache = _load_brand_map()
+    q_lower = query.lower()
+    additions = []
+    for brand, generic in _brand_map_cache.items():
+        if brand in q_lower:
+            additions.append(generic)
+    if additions:
+        return query + " " + " ".join(additions)
+    return query
+
 
 def _build_tfidf(docs: list[dict]) -> list[dict]:
     """Build a simple TF-IDF index over the text field of each document."""
@@ -224,7 +311,7 @@ def rebuild_index(host: str = "http://localhost:11434") -> None:
     _get_collection(host=host)
 
 
-def retrieve(query: str, n_results: int = 3,
+def retrieve(query: str, n_results: int = 5,
              host: str = "http://localhost:11434") -> list[dict]:
     """
     Retrieve the top-n most relevant drug knowledge chunks for a query.
@@ -239,7 +326,8 @@ def retrieve(query: str, n_results: int = 3,
     # ---- ChromaDB path -----------------------------------------------
     try:
         col = _get_collection(host=host)
-        results = col.query(query_texts=[query], n_results=min(n_results, col.count()))
+        expanded_query = _expand_query(query)
+        results = col.query(query_texts=[expanded_query], n_results=min(n_results, col.count()))
         chunks = []
         ids_list  = results.get("ids", [[]])[0]
         docs_list = results.get("documents", [[]])[0]
@@ -264,7 +352,8 @@ def retrieve(query: str, n_results: int = 3,
     # ---- TF-IDF fallback ---------------------------------------------
     if _tfidf_corpus is None:
         _tfidf_corpus = _build_tfidf(_load_kb())
-    return _tfidf_search(query, _tfidf_corpus, n=n_results)
+    expanded_query = _expand_query(query)
+    return _tfidf_search(expanded_query, _tfidf_corpus, n=n_results)
 
 
 def build_rag_prompt(query: str, chunks: list[dict]) -> str:
@@ -284,29 +373,50 @@ def build_rag_prompt(query: str, chunks: list[dict]) -> str:
 
     context_block = "\n\n".join(refs)
     augmented = (
-        f"Use the following clinical reference excerpts to answer the question.\n"
-        f"Cite sources as [REF 1], [REF 2] etc. where relevant.\n\n"
-        f"{context_block}\n\n"
-        f"QUESTION: {query}"
+        f"{query}\n\n"
+        f"---\n"
+        f"Reference information:\n{context_block}"
     )
     return augmented
 
 
 def format_citations(chunks: list[dict]) -> str:
     """
-    Return a markdown string of citation cards for display in the Streamlit UI.
+    Return styled HTML source cards for display in the Streamlit UI.
     """
     if not chunks:
         return ""
-    lines = ["**Sources retrieved from knowledge base:**"]
+
+    cards = []
     for i, c in enumerate(chunks, 1):
         drug  = c.get("drug", "General")
-        cat   = c.get("category", "")
+        cat   = c.get("category", "").replace("_", " ").title()
         score = c.get("score", 0.0)
-        src   = c.get("source", "")
-        bar   = "" * int(score * 10) + "" * (10 - int(score * 10))
-        lines.append(
-            f"**[REF {i}]** `{drug}`  {cat}  "
-            f"| relevance {bar} {score:.2f}  _{src}_"
+        pct   = int(score * 100)
+        if pct >= 65:
+            colour, bg, badge = "#1a7a4a", "#e8f5ee", "#1a7a4a"
+        elif pct >= 45:
+            colour, bg, badge = "#7a5a00", "#fff8e1", "#e6a800"
+        else:
+            colour, bg, badge = "#7a2020", "#fdecea", "#c0392b"
+        cards.append(
+            f'<div style="display:flex;align-items:center;gap:10px;'
+            f'padding:7px 12px;margin:3px 0;border-radius:10px;'
+            f'background:{bg};border-left:4px solid {badge};">'
+            f'<span style="font-size:0.72rem;font-weight:700;color:#888;'
+            f'min-width:40px;">REF {i}</span>'
+            f'<span style="font-size:0.84rem;font-weight:600;color:{colour};">{drug}</span>'
+            f'<span style="font-size:0.78rem;color:#666;font-style:italic;">{cat}</span>'
+            f'<span style="margin-left:auto;font-size:0.78rem;font-weight:700;'
+            f'color:{colour};">{pct}%</span></div>'
         )
-    return "\n\n".join(lines)
+
+    inner = "".join(cards)
+    return (
+        '<div style="margin-top:10px;padding:10px 14px;border-radius:12px;'
+        'background:#f8f9fb;border:1px solid #e0e4ea;">'
+        '<p style="font-size:0.74rem;font-weight:700;color:#999;'
+        'letter-spacing:0.05em;margin:0 0 6px 0;">'
+        '\U0001f4da SOURCES FROM KNOWLEDGE BASE</p>'
+        f'{inner}</div>'
+    )

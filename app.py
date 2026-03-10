@@ -1,7 +1,25 @@
-﻿import streamlit as st
+import streamlit as st
 import time
 from datetime import datetime
-import rag_engine as _rag
+
+# Import custom modules
+try:
+    from interaction_checker import check_interactions, format_interaction_alert
+    INTERACTION_CHECKER_AVAILABLE = True
+except ImportError:
+    INTERACTION_CHECKER_AVAILABLE = False
+
+try:
+    from dosing_validator import validate_prescription, validate_dose
+    DOSING_VALIDATOR_AVAILABLE = True
+except ImportError:
+    DOSING_VALIDATOR_AVAILABLE = False
+
+try:
+    from rag_engine import retrieve, build_rag_prompt, is_ready as rag_is_ready, format_citations
+    RAG_ENGINE_AVAILABLE = True
+except ImportError:
+    RAG_ENGINE_AVAILABLE = False
 
 
 #  Page Configuration (must be the first Streamlit call) 
@@ -191,188 +209,227 @@ header            { display: none !important; }
 
 def process_prescription_ocr(image_bytes: bytes) -> dict:
     """
-    Real OCR pipeline via ocr_engine.process_image_bytes().
-    Falls back to the demo stub when the ocr_engine dependencies are missing.
+    OCR pipeline  calls ocr_engine.process_image_bytes(), then enriches the
+    result with interaction checking and dosing validation where modules exist.
+    Falls back to demo data when ocr_engine dependencies are unavailable.
     """
     try:
         from ocr_engine import process_image_bytes as _ocr
-        return _ocr(image_bytes, filename="prescription.png")
+        result = _ocr(image_bytes, filename="prescription.png")
+
+        if result.get("status") == "success":
+            medications = result.get("medications", [])
+
+            if medications and INTERACTION_CHECKER_AVAILABLE:
+                drug_names = [m.split()[0] for m in medications if m]
+                result["interactions"] = check_interactions(drug_names)
+
+            parsed_meds = result.get("parsed_meds", [])
+            if parsed_meds and DOSING_VALIDATOR_AVAILABLE:
+                result["dosing_validation"] = validate_prescription(parsed_meds)
+
+        return result
+
     except Exception as exc:
-        # Graceful fallback: show demo data + error banner so the UI still works
         return {
-            "status":         "error",
+            "status":        "error",
             "extracted_text": (
                 "PRESCRIPTION\n"
-                "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+                "\n"
                 "Patient   : John Doe  (DOB: 01 Jan 1980)\n"
                 "Date      : 09 Mar 2026\n"
                 "Provider  : Dr. Sarah Mitchell, MD\n"
-                "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+                "\n"
                 "Rx 1 : Amoxicillin 500 mg    Sig: 1 cap PO TID x 7 days\n"
                 "Rx 2 : Ibuprofen 400 mg      Sig: 1 tab PO PRN q6h\n"
                 "Rx 3 : Omeprazole 20 mg      Sig: 1 cap PO QD AC breakfast\n"
-                "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+                "\n"
                 "[DEMO DATA  OCR engine unavailable: " + str(exc) + "]"
             ),
-            "medications":   ["Amoxicillin 500mg", "Ibuprofen 400mg", "Omeprazole 20mg"],
-            "parsed_meds":   [],
-            "patient":       "John Doe",
-            "date":          "09 Mar 2026",
-            "prescriber":    "Dr. Sarah Mitchell, MD",
-            "dea":           "",
-            "confidence":    0.0,
-            "preprocessing": [],
-            "error":         str(exc),
+            "medications":    ["Amoxicillin 500mg", "Ibuprofen 400mg", "Omeprazole 20mg"],
+            "parsed_meds":    [],
+            "patient":        "John Doe",
+            "date":           "09 Mar 2026",
+            "prescriber":     "Dr. Sarah Mitchell, MD",
+            "dea":            "",
+            "confidence":     0.0,
+            "preprocessing":  [],
+            "error":          str(exc),
         }
 
 
-def query_ollama_llm(user_message: str, chat_history: list) -> str:
-    """Send prompt + history to local BioMistral via Ollama.
+def _get_ram_warning(exc: Exception, host: str) -> str:
+    """Return an actionable error message for Ollama/BioMistral failures."""
+    import ctypes
+    msg = str(exc)
+    try:
+        import ctypes
+        mem = ctypes.c_uint64(0)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(
+            type("MEMORYSTATUSEX", (ctypes.Structure,), {
+                "_fields_": [("dwLength", ctypes.c_uint32),
+                             ("dwMemoryLoad", ctypes.c_uint32),
+                             ("ullTotalPhys", ctypes.c_uint64),
+                             ("ullAvailPhys", ctypes.c_uint64),
+                             ("ullTotalPageFile", ctypes.c_uint64),
+                             ("ullAvailPageFile", ctypes.c_uint64),
+                             ("ullTotalVirtual", ctypes.c_uint64),
+                             ("ullAvailVirtual", ctypes.c_uint64),
+                             ("ullAvailExtendedVirtual", ctypes.c_uint64)],
+            })()
+        ))
+    except Exception:
+        pass
+    # Simpler psutil-based check
+    free_gb = 0.0
+    try:
+        import psutil
+        free_gb = round(psutil.virtual_memory().available / 1073741824, 1)
+    except Exception:
+        pass
+    needed_gb = 4.5
+    ram_line = (
+        f"**Free RAM:** {free_gb} GB available / ~{needed_gb} GB required.\n\n"
+        if free_gb > 0 else ""
+    )
+    if "system memory" in msg or "allocate" in msg or free_gb < needed_gb:
+        return (
+            "**⚠️ BioMistral cannot load – not enough free RAM**\n\n"
+            + ram_line
+            + "**To free RAM, close any of these:**\n"
+            "- Browser tabs (Edge/Chrome/Brave)\n"
+            "- VS Code extensions (disable unused ones)\n"
+            "- Other background applications\n\n"
+            "After closing apps, wait 10 seconds then send your message again.\n\n"
+            f"_Technical: {msg}_"
+        )
+    return (
+        f"**BioMistral offline** – could not reach Ollama at {host}\n\n"
+        f"Error: {msg}\n\n"
+        "Make sure Ollama is running (ollama serve) and the model is available."
+    )
 
-    Uses generate(raw=True) with a manually-built ChatML prompt.
-    The model Modelfile uses generate-style template which makes the chat()
-    API return empty strings; raw=True bypasses the Modelfile stop params.
-    """
+
+def query_ollama_llm(user_message: str, chat_history: list) -> str:
+    """BioMistral 7B via Ollama  clinical pharmacist analysis."""
     import ollama as _ollama
     import re as _re
-    # ----------------------------------------------------------------
-    # 1. NON-ENGLISH GUARD
-    # ----------------------------------------------------------------
-    import re as _re2
-    if _re2.search(r'[\u0600-\u06FF\u0750-\u077F\u4E00-\u9FFF\u3040-\u30FF\u0400-\u04FF\u0900-\u097F]', user_message):
-        return (
-            "I only understand English. "
-            "Please rephrase your question in English and I will be happy to help."
-        )
+    import streamlit as st
 
-    # ----------------------------------------------------------------
-    # 2. QUERY REWRITING  (spell-correct + expand + context injection)
-    # ----------------------------------------------------------------
-    # 2a. Drug name spell-correction dictionary
+    # 1. Query expansion (medical abbreviations  full terms for better RAG recall)
     _SPELL = {
-        "amoxicllin": "amoxicillin", "amoxicilin": "amoxicillin",
-        "amoxiciline": "amoxicillin", "amoxycillin": "amoxicillin",
-        "ibeprofen": "ibuprofen", "ibuprofin": "ibuprofen",
-        "ibupropen": "ibuprofen", "brufen": "ibuprofen",
-        "omeprazol": "omeprazole", "omeprzaole": "omeprazole",
-        "warfrin": "warfarin", "warfarine": "warfarin", "wafarin": "warfarin",
-        "metformine": "metformin", "metformine": "metformin",
-        "atorvastatin": "atorvastatin", "atrovastatin": "atorvastatin",
-        "aspirine": "aspirin", "asprin": "aspirin",
-        "paracetamole": "paracetamol", "paracetamole": "paracetamol",
-        "amlodipin": "amlodipine", "amlodipine": "amlodipine",
-        "lisinopril": "lisinopril",
-        "clopidogrel": "clopidogrel", "clopidorel": "clopidogrel",
+        "ckd":  "chronic kidney disease",
+        "inr":  "warfarin monitoring",
+        "renal": "kidney impairment",
+        "dm":   "diabetes mellitus",
+        "htn":  "hypertension",
+        "afib": "atrial fibrillation",
     }
-    _rewritten = user_message.lower()
-    for _misspell, _correct in _SPELL.items():
-        if _misspell in _rewritten:
-            user_message = _re2.sub(
-                r'\b' + _re2.escape(_misspell) + r'\b',
-                _correct, user_message, flags=_re2.IGNORECASE
-            )
+    _msg = user_message
+    for _abbr, _full in _SPELL.items():
+        _msg = _re.sub(r"\b" + _abbr + r"\b", _full, _msg, flags=_re.IGNORECASE)
 
-    # 2b. Query expansion  map terse clinical shorthand to full clinical phrases
-    _EXPAND = [
-        (r'\b(ckd|chronic kidney disease|renal failure|renal impairment)\b',
-         'chronic kidney disease (renal impairment, CKD)'),
-        (r'\brenal (dose|dosing)\b', 'renal dosage adjustment'),
-        (r'\bhepatic (dose|dosing)\b', 'hepatic dosage adjustment'),
-        (r'\bcheck interactions?\b', 'check drug-drug interactions'),
-        (r'\bside effects?\b', 'adverse effects and side effects'),
-        (r'\bpregnancy\b', 'use in pregnancy (safety, FDA category)'),
-        (r'\belderly|geriatric\b', 'use in elderly patients (geriatric dosing)'),
-        (r'\bpeds|paediatric|pediatric\b', 'paediatric dosing'),
-        (r'\binr\b', 'INR (International Normalised Ratio) coagulation monitoring'),
-        (r'\bddis?\b', 'drug-drug interactions'),
-    ]
-    for _pat, _replacement in _EXPAND:
-        user_message = _re2.sub(_pat, _replacement, user_message, flags=_re2.IGNORECASE)
+    # 2. Detect whether this is a clinical / drug-related query
+    _CLINICAL_RE = _re.compile(
+        r"\b(mg|mcg|tablet|capsule|dose|drug|medication|medicine|prescription|"
+        r"interaction|warfarin|metformin|aspirin|amoxicillin|ibuprofen|omeprazole|"
+        r"renal|hepat|cardiac|diabetes|hypertens|antibiotic|antihypertens|"
+        r"pharmacok|pharmacodyn|cyp[0-9]|inhibit|induc|patient|side.?effect|"
+        r"contraindic|overdose|toxicity|mechanism|serotonin|bleeding|coumadin)\b",
+        _re.IGNORECASE,
+    )
+    _is_clinical = bool(_CLINICAL_RE.search(_msg)) or len(_msg.split()) >= 6
 
-    # 2c. Context injection  if a prescription was scanned, inject drug list
-    #     when the query looks like a generic interaction/check request
-    _ocr = st.session_state.get("ocr_result")
-    _meds = _ocr.get("medications", []) if _ocr else []
-    _GENERIC_PATTERNS = [
-        r'\bcheck (drug[-\s]?)?interactions?\b',
-        r'\binteractions? (for|of|in) (the )?(active |current |scanned )?(prescription|rx|meds|medications)\b',
-        r'\bwhat (are|about) (the )?interactions?\b',
-        r'\bany interactions?\b',
-        r'\binteractions? check\b',
-    ]
-    if _meds and any(_re2.search(p, user_message, _re2.IGNORECASE) for p in _GENERIC_PATTERNS):
-        _med_list = ", ".join(_meds)
-        user_message = (
-            f"Check drug-drug interactions between the following medications "
-            f"from the active prescription: {_med_list}. "
-            f"Highlight any major or moderate interactions and clinical significance."
-        )
-
-    # -- 3. RAG RETRIEVAL from ChromaDB --
-    _HOST = st.session_state.get("ol_host", "http://localhost:11434")
-    _rag_chunks = []
-    try:
-        _rag_chunks = _rag.retrieve(user_message, n_results=3, host=_HOST)
-    except Exception:
-        _rag_chunks = []
-    augmented_query = _rag.build_rag_prompt(user_message, _rag_chunks) if _rag_chunks else user_message
-    st.session_state["last_citations"] = _rag.format_citations(_rag_chunks) if _rag_chunks else ""
+    # 3. RAG retrieval (clinical queries only, high-confidence threshold)
+    _rag_block = ""
+    rag_chunks = []
+    if _is_clinical and RAG_ENGINE_AVAILABLE:
+        try:
+            rag_chunks = retrieve(_msg, n_results=3)
+            if rag_chunks and rag_chunks[0].get("score", 0) >= 0.65:
+                _refs = [
+                    "[{drug}]\n{text}".format(
+                        drug=c.get("drug", "").upper(), text=c["text"]
+                    )
+                    for c in rag_chunks
+                ]
+                _rag_block = "\n\nVERIFIED CLINICAL REFERENCES:\n" + "\n\n".join(_refs)
+        except Exception as _re_err:
+            print(f"RAG error: {_re_err}")
 
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
-    _SYS   = st.session_state.get(
-        "ol_system_prompt",
-        "You are a clinical pharmacist AI. Answer questions directly and concisely."
-        " RULES: 1. NEVER start your reply with a self-introduction."
-        " Go straight to the answer. 2. Answer drug interaction, dosage,"
-        " and safety questions immediately. Do NOT ask for patient demographics"
-        " unless the question is specifically about patient-specific dosing."
-        " 3. Always respond in English regardless of the input language."
-        " 4. End each answer with a one-line disclaimer to consult a licensed pharmacist.",
-    )
+
+    # 4. System prompt  two modes: clinical 5-section vs conversational
+    if _is_clinical:
+        _SYS = (
+            "You are a Senior Clinical Pharmacist AI.\n"
+            "Analyze the drug interaction or clinical case below.\n\n"
+            "Your response must contain exactly five numbered sections:\n"
+            "  1. INTERACTION SUMMARY: classify as MAJOR, MODERATE, or MINOR; give a one-sentence reason.\n"
+            "  2. MECHANISM: explain the pharmacokinetic or pharmacodynamic basis.\n"
+            "  3. CLINICAL EFFECT: describe the consequences for the patient.\n"
+            "  4. MANAGEMENT: state the recommended clinician or pharmacist action.\n"
+            "  5. MONITORING: list the parameters to monitor (labs, vitals, symptoms).\n\n"
+            "LANGUAGE: reply in the same language as the user; keep drug names and enzyme names in English.\n"
+            "Provide real clinical details. Do not copy these instructions into your answer.\n"
+            "IMPORTANT: Write ALL FIVE sections in one reply. Do not stop after section 1."
+        ) + _rag_block
+    else:
+        _SYS = (
+            "You are a helpful Clinical Pharmacist AI assistant. "
+            "Respond politely and concisely. "
+            "Match the language the user used (Arabic or English)."
+        )
+
+    # 5. Mistral [INST] prompt
+    # Clinical: seed past the section label so the model fills in content, not the template.
+    # Conversational: no seed, model answers freely.
+    if _is_clinical:
+        full_prompt = (
+            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
+            f"Analyze this drug interaction or clinical case: {_msg} [/INST]\n"
+            f"1. INTERACTION SUMMARY:"
+        )
+    else:
+        full_prompt = f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n{_msg} [/INST]"
+
+    # 6. Generate
     try:
         client = _ollama.Client(host=_HOST)
-        # Build ChatML string.
-        # BioMistral expects: system -> user -> assistant -> user -> ...
-        # The chat_history may start with the UI welcome (assistant before any user).
-        # Including that breaks the expected turn order and causes empty / looping output.
-        # Fix: skip all history entries that appear before the first user message.
-        parts = [f"<|im_start|>system\n{_SYS}\n<|im_end|>"]
-        first_user_seen = False
-        for m in chat_history:
-            if m["role"] == "user":
-                first_user_seen = True
-            if not first_user_seen:
-                continue  # skip UI-only greeting lines before first real user message
-            if not m.get("content", "").strip():
-                continue  # skip empty messages
-            parts.append(f"<|im_start|>{m['role']}\n{m['content']}\n<|im_end|>")
-        parts.append(f"<|im_start|>user\n{augmented_query}\n<|im_end|>")
-        parts.append("<|im_start|>assistant\n")
-        full_prompt = "\n".join(parts)
         resp = client.generate(
             model=_MODEL,
             prompt=full_prompt,
             raw=True,
-            options={"num_predict": 1024, "temperature": 0.3, "repeat_penalty": 1.2, "num_gpu": 0},
+            options={
+                "num_predict":    1500,
+                "temperature":    0.2,
+                "top_p":          0.85,
+                "repeat_penalty": 1.0,   # off: do not penalise section number tokens
+                "num_ctx":        4096,
+                "num_gpu":        20,
+            },
         )
-        # Strip any trailing <|im_end|> the model may emit
-        answer = _re.sub(r"<\|im_end\|>.*$", "", resp.response, flags=_re.DOTALL).strip()
-        # Strip any echoed instruction markers the model may parrot back
-        answer = _re.sub(r"^\[LANGUAGE[^\]]*\][^\n]*\n?", "", answer, flags=_re.IGNORECASE).strip()
-        if not answer:
-            return (
-                "⚠️ The model returned an empty response.\n\n"
-                "This usually means Ollama is running but the model is still loading. "
-                "Please wait 30 seconds and try again."
-            )
+        # Prepend the seeded "1." back for clinical answers
+        answer = ("1. INTERACTION SUMMARY:" if _is_clinical else "") + resp.response.strip()
+
+        # Strip any leaked prompt markers
+        for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]"):
+            idx = answer.rfind(_marker)
+            if idx != -1:
+                answer = answer[idx + len(_marker):].strip()
+
+        if len(answer) < 15:
+            return "⚠️ لم يصدر الموديل رداً. تأكد من تشغيل Ollama وأعد المحاولة."
+
+        if rag_chunks and rag_chunks[0].get("score", 0) >= 0.65:
+            from rag_engine import format_citations
+            answer += f"\n\n---\n{format_citations(rag_chunks)}"
+
         return answer
+
     except Exception as exc:
-        return (
-            f"**BioMistral offline** - could not reach Ollama at `{_HOST}`\n\n"
-            f"Error: `{exc}`\n\n"
-            "Make sure Ollama is running (`ollama serve`) and the model is available."
-        )
+        return _get_ram_warning(exc, _HOST)
 
 
 def check_drug_interactions(drug_list: list) -> list:
@@ -540,8 +597,6 @@ if "chat_history" not in st.session_state:
 if "ocr_result" not in st.session_state:
     st.session_state.ocr_result = None
 
-if "last_citations" not in st.session_state:
-    st.session_state["last_citations"] = ""
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 
@@ -829,6 +884,35 @@ elif active_page == "Prescription Scanner":
                 f"<span class='drug-tag'>{m}</span>" for m in ocr["medications"]
             )
             st.markdown(pills_html, unsafe_allow_html=True)
+            
+            # Display drug interactions if available
+            if "interactions" in ocr and ocr["interactions"]:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("### ⚠️ Drug Interaction Warnings")
+                for interaction in ocr["interactions"]:
+                    if INTERACTION_CHECKER_AVAILABLE:
+                        st.markdown(format_interaction_alert(interaction), unsafe_allow_html=True)
+                    else:
+                        severity_icons = {'major': '🚫', 'moderate': '⚠️', 'minor': 'ℹ️'}
+                        icon = severity_icons.get(interaction.get('severity', 'minor'), '•')
+                        st.warning(f"{icon} {interaction.get('drug1')} + {interaction.get('drug2')}: {interaction.get('description')}")
+            
+            # Display dosing validation if available
+            if "dosing_validation" in ocr and ocr["dosing_validation"]:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("### 💊 Dosing Validation")
+                for validation in ocr["dosing_validation"]:
+                    error_type = validation.get('error_type')
+                    if error_type == 'too_high':
+                        st.error(validation.get('message'))
+                    elif error_type == 'too_low':
+                        st.warning(validation.get('message'))
+                    elif error_type == 'high' or error_type == 'low':
+                        st.info(validation.get('message'))
+                    elif error_type is None and validation.get('valid'):
+                        st.success(validation.get('message'))
+                    else:
+                        st.info(validation.get('message'))
 
             # Structured parse table (only when real OCR ran)
             parsed = ocr.get("parsed_meds", [])
@@ -992,13 +1076,9 @@ elif active_page == "Drug Interaction Chat":
     with chat_box:
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+                st.markdown(msg["content"], unsafe_allow_html=True)
 
         # Immediately show typing dots, then call LLM and replace with response
-        if st.session_state.get("last_citations"):
-            with st.expander("📖 Sources from knowledge base", expanded=False):
-                st.markdown(st.session_state["last_citations"])
-
         if st.session_state.get("pending_input"):
             with st.chat_message("assistant"):
                 st.markdown(
@@ -1201,17 +1281,19 @@ elif active_page == "Settings":
 
         st.text_area(
             "System Prompt",
-            value=(
-                "You are an expert clinical pharmacist assistant specialising in drug safety, "
-                "pharmacokinetics, and drug-drug interactions. Provide concise, evidence-based "
-                "responses. Always recommend consulting a licensed pharmacist or physician for "
-                "patient-specific clinical decisions. "
-                "IMPORTANT: Detect the language of the user's message and reply in the SAME language. "
-                "If the user writes in Arabic, respond fully in Arabic (use proper medical Arabic terminology). "
-                "If the user writes in English, respond in English."
+             value=(
+                "You are an expert clinical pharmacist AI. "
+                "Answer drug questions directly and concisely. "
+                "For drug interactions always state: severity (MAJOR/MODERATE/MINOR), "
+                "mechanism (name the enzyme e.g. CYP2C9), clinical effect, "
+                "dose adjustment needed, and monitoring parameters with frequency. "
+                "Use markdown headers and tables where helpful. "
+                "Flag contraindications with ⚠️. "
+                "Respond in the same language the user writes in. "
+                "End every answer with: ⚠️ Always verify with a licensed pharmacist or prescriber."
             ),
             height=110,
-            key="ol_system_prompt",
+            key="ol_system_prompt_custom",
         )
 
     #  OCR 

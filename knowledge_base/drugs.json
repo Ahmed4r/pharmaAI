@@ -135,7 +135,7 @@
     "id": "clopidogrel_interactions",
     "drug": "Clopidogrel",
     "category": "interactions",
-    "text": "Clopidogrel drug interactions: (1) Omeprazole, esomeprazole - PPIs inhibit CYP2C19, reducing clopidogrel activation by 40-50%; may reduce antiplatelet efficacy and increase cardiovascular events; use pantoprazole or rabeprazole instead if PPI needed. (2) Aspirin - dual antiplatelet therapy: used intentionally post-ACS/stent but increases bleeding risk especially GI; balance benefit vs risk. (3) Warfarin - triple antithrombotic therapy; significantly increases major bleeding risk; use only when clearly indicated (e.g., AF + recent stent). (4) NSAIDs - additive bleeding risk. (5) SSRIs - increased bleeding risk via platelet serotonin depletion. (6) CYP2C19 inhibitors (fluconazole, fluvoxamine, fluoxetine) - reduce clopidogrel activation; consider alternative antiplatelet. (7) Morphine - delays and reduces clopidogrel absorption via delayed gastric emptying."
+    "text": "Clopidogrel (brand name: Plavix) drug interactions: (1) Omeprazole, esomeprazole - PPIs inhibit CYP2C19, reducing clopidogrel activation by 40-50%; may reduce antiplatelet efficacy and increase cardiovascular events; use pantoprazole or rabeprazole instead if PPI needed. (2) Aspirin - dual antiplatelet therapy: used intentionally post-ACS/stent but increases bleeding risk especially GI; balance benefit vs risk. (3) Warfarin - triple antithrombotic therapy; significantly increases major bleeding risk; use only when clearly indicated (e.g., AF + recent stent). (4) NSAIDs - additive bleeding risk. (5) SSRIs - increased bleeding risk via platelet serotonin depletion. (6) CYP2C19 inhibitors (fluconazole, fluvoxamine, fluoxetine) - reduce clopidogrel activation; consider alternative antiplatelet. (7) Morphine - delays and reduces clopidogrel absorption via delayed gastric emptying."
   },
   {
     "id": "furosemide_interactions",
@@ -184,5 +184,245 @@
     "drug": "Amlodipine",
     "category": "interactions",
     "text": "Amlodipine (calcium channel blocker) drug interactions: (1) Simvastatin - FDA recommends limiting simvastatin to 20 mg/day when combined with amlodipine due to increased myopathy risk (amlodipine weakly inhibits CYP3A4; switch to atorvastatin or rosuvastatin). (2) CYP3A4 inhibitors (clarithromycin, itraconazole, ritonavir) - increase amlodipine exposure; monitor for hypotension. (3) CYP3A4 inducers (rifampicin, carbamazepine) - reduce amlodipine levels, possible reduced antihypertensive effect. (4) Beta-blockers - additive antihypertensive and heart rate effects; generally safe combination, rarely causes excessive bradycardia. (5) Cyclosporine - amlodipine can increase cyclosporine levels; monitor trough levels. (6) Tacrolimus - increased tacrolimus levels reported. (7) Sildenafil/tadalafil - additive hypotension, especially with nitrates; caution."
+  },
+  {
+    "id": "rosuvastatin_overview",
+    "drug": "Rosuvastatin",
+    "category": "overview",
+    "text": "Rosuvastatin (brand name: Crestor) is an HMG-CoA reductase inhibitor (statin). It is a highly potent statin that reduces LDL-cholesterol by 45-63% depending on dose, with greater efficacy per mg compared to atorvastatin or simvastatin. Also raises HDL and reduces triglycerides and C-reactive protein. Indicated for hypercholesterolaemia, mixed dyslipidaemia, and primary prevention of cardiovascular events. Unlike atorvastatin and simvastatin, rosuvastatin is NOT metabolised by CYP3A4 - it is primarily excreted unchanged via CYP2C9 (minor) making it less susceptible to CYP3A4-based drug interactions. Brand name: Crestor. Pregnancy: contraindicated (category X - teratogenic)."
+  },
+  {
+    "id": "rosuvastatin_interactions",
+    "drug": "Rosuvastatin",
+    "category": "interactions",
+    "text": "Rosuvastatin (Crestor) drug interactions - primary risk is myopathy/rhabdomyolysis: (1) Cyclosporine - MAJOR interaction, increases rosuvastatin AUC 7x via OATP1B1 transport inhibition; limit rosuvastatin to 5 mg/day or avoid. (2) Gemfibrozil (fibrate) - increases rosuvastatin exposure 2x via OATP1B1; also additive myopathy risk; limit rosuvastatin to 10 mg/day. (3) Fenofibrate - less interaction than gemfibrozil; additive myopathy risk; monitor CK. (4) Clopidogrel (Plavix) - no significant pharmacokinetic interaction; safe combination used in cardiovascular risk reduction. (5) Aspirin - no significant interaction with rosuvastatin; dual use common in cardiovascular patients. (6) Warfarin - rosuvastatin can modestly increase INR via CYP2C9; monitor INR when initiating or changing dose. (7) Antacids (aluminium/magnesium hydroxide) - reduce rosuvastatin absorption by ~50%; take rosuvastatin 2 hours before antacid. (8) Niacin (high dose >1 g/day) - additive myopathy risk. (9) HIV protease inhibitors (lopinavir/ritonavir, atazanavir) - increase rosuvastatin levels significantly; limit to 10 mg/day. (10) Colchicine - increased myopathy risk. Note: unlike simvastatin and atorvastatin, rosuvastatin does NOT interact with grapefruit juice (not CYP3A4 substrate)."
+  },
+  {
+    "id": "rosuvastatin_contraindications",
+    "drug": "Rosuvastatin",
+    "category": "contraindications",
+    "text": "Rosuvastatin (Crestor) contraindications: Pregnancy and breastfeeding (category X - teratogenic, inhibits fetal cholesterol synthesis). Active liver disease or unexplained persistent elevations in hepatic transaminases. Severe renal impairment (CrCl < 30 mL/min/1.73m2) - start at 5 mg/day, max 10 mg/day. Asian patients: start at 5 mg due to higher plasma levels. Myopathy risk factors: hypothyroidism, personal/family history of hereditary muscular disorders, previous muscle toxicity with another statin, alcohol excess. Dosing: start 10-20 mg once daily (5 mg in Asian patients or renal impairment). Maximum 40 mg/day. Take at any time of day (unlike some statins, need not be taken at night). Side effects: myalgia, raised CK (dose-dependent), hepatic transaminase elevation, proteinuria at high doses (40 mg), headache, GI upset."
+  },
+  {
+    "id": "clopidogrel_overview",
+    "drug": "Clopidogrel",
+    "category": "overview",
+    "text": "Clopidogrel (brand name: Plavix) is a thienopyridine antiplatelet drug. It is a prodrug that requires activation by CYP2C19 to form its active thiol metabolite, which irreversibly blocks the P2Y12 ADP receptor on platelets, inhibiting ADP-induced platelet aggregation. Used for secondary prevention after myocardial infarction (MI), stroke, and peripheral arterial disease. Used with aspirin (dual antiplatelet therapy, DAPT) after coronary stent placement or acute coronary syndrome (ACS). CYP2C19 poor metabolisers (~15-30% of patients, more common in Asian populations) have reduced activation and reduced antiplatelet effect - consider prasugrel or ticagrelor in these patients. Typical dose: 75 mg once daily. Loading dose: 300-600 mg for ACS or before PCI."
+  },
+  {
+    "id": "metronidazole_overview",
+    "drug": "Metronidazole",
+    "category": "overview",
+    "text": "Metronidazole (brand names: Flagyl, Rozex) is a nitroimidazole antibiotic and antiprotozoal. Used for anaerobic bacterial infections, H. pylori eradication, C. difficile, bacterial vaginosis, trichomoniasis, and dental/abdominal infections. Standard doses: 400-500mg TID (oral) or 500mg IV TID. Duration typically 5-10 days. Penetrates well into tissues including CNS. Bactericidal against anaerobes and protozoa. CYP inhibitor - inhibits CYP2C9 and has disulfiram-like reaction with alcohol. Avoid alcohol during treatment and for 48 hours after last dose."
+  },
+  {
+    "id": "metronidazole_interactions",
+    "drug": "Metronidazole",
+    "category": "interactions",
+    "text": "Metronidazole (Flagyl) has clinically significant drug interactions: (1) WARFARIN - MAJOR interaction. Metronidazole inhibits CYP2C9 (warfarin metabolism enzyme) AND alters gut flora that produce vitamin K. Combined effect dramatically INCREASES warfarin effect, raising INR by 50-100% within 3-5 days. Monitor INR within 3 days of starting, again at day 5-7. Empirically reduce warfarin dose by 25-50% when starting metronidazole 500mg TID x 7 days. Resume pre-treatment warfarin dose after course ends; recheck INR 3-5 days post-completion. (2) ALCOHOL - disulfiram-like reaction: flushing, vomiting, tachycardia. Avoid alcohol completely during treatment and 48h after. (3) LITHIUM - metronidazole reduces lithium renal clearance; monitor lithium levels. (4) PHENYTOIN - metronidazole inhibits phenytoin metabolism; phenytoin toxicity risk. (5) CYCLOSPORINE - increased cyclosporine levels. (6) DISULFIRAM - psychotic reactions reported; avoid combination. Monitoring: CBC for courses >10 days (peripheral neuropathy risk); LFTs in hepatic impairment."
+  },
+  {
+    "id": "metronidazole_contraindications",
+    "drug": "Metronidazole",
+    "category": "contraindications",
+    "text": "Metronidazole contraindications and cautions: ABSOLUTE: hypersensitivity to nitroimidazoles; disulfiram use within 2 weeks; alcohol consumption. PREGNANCY: Avoid in first trimester (teratogenicity concern). Use with caution in 2nd/3rd trimester only if benefit outweighs risk. Not recommended in breastfeeding - withhold feeds for 12-24h after dose. HEPATIC IMPAIRMENT: severe hepatic disease - reduce dose by 50%; accumulation risk. NEUROLOGICAL: use with caution in patients with seizure disorders or peripheral neuropathy - can worsen both. Discontinue if neurological symptoms develop. RENAL: no dose adjustment needed in renal impairment for short courses."
+  },
+  {
+    "id": "naproxen_overview",
+    "drug": "Naproxen",
+    "category": "overview",
+    "text": "Naproxen is a non-selective NSAID (non-steroidal anti-inflammatory drug) that inhibits both COX-1 and COX-2 cyclooxygenase enzymes, reducing prostaglandin synthesis. Used for pain, inflammation, dysmenorrhoea, osteoarthritis, gout. Brand names: Naprosyn, Aleve, Anaprox. Longer half-life (~12-17 hours) than ibuprofen, allowing twice-daily dosing. Like all NSAIDs, it reduces renal prostaglandins which are critical for maintaining renal perfusion in patients with reduced kidney function."
+  },
+  {
+    "id": "naproxen_dosing",
+    "drug": "Naproxen",
+    "category": "dosing",
+    "text": "Naproxen standard adult dose: 250-500 mg twice daily (every 12 hours). Maximum dose: 1500 mg/day for acute pain, 1000 mg/day for long-term use. Take with food to reduce GI upset. RENAL DOSE ADJUSTMENT: CONTRAINDICATED in CrCl < 30 mL/min (eGFR < 30). Use with extreme caution if CrCl 30-60 mL/min - use lowest effective dose for shortest duration and monitor renal function closely. CrCl of 25 mL/min: Naproxen is CONTRAINDICATED - avoid completely. Risk of further acute kidney injury on top of existing CKD."
+  },
+  {
+    "id": "naproxen_interactions",
+    "drug": "Naproxen",
+    "category": "interactions",
+    "text": "Naproxen drug interactions: (1) RENAL IMPAIRMENT / CKD - MAJOR: NSAIDs including naproxen inhibit prostaglandin-mediated renal afferent arteriolar dilation. In CKD patients who depend on prostaglandins to maintain GFR, naproxen can precipitate acute-on-chronic kidney injury. CONTRAINDICATED in CrCl < 30 mL/min. (2) ACE inhibitors/ARBs + Diuretics (Triple Whammy) - MAJOR: combination of NSAID + ACEi/ARB + diuretic dramatically increases AKI risk. (3) Anticoagulants (Warfarin) - MAJOR: NSAIDs inhibit platelet aggregation + GI ulceration, potentiating bleeding risk; monitor INR. (4) Lithium - NSAIDs reduce lithium renal clearance; lithium toxicity risk; monitor levels. (5) Methotrexate - NSAIDs reduce renal clearance of methotrexate; severe toxicity. (6) SSRIs - increased GI bleeding risk with combination. (7) Antihypertensives - NSAIDs blunt antihypertensive effect by causing sodium and water retention."
+  },
+  {
+    "id": "naproxen_contraindications",
+    "drug": "Naproxen",
+    "category": "contraindications",
+    "text": "Naproxen contraindications: (1) RENAL IMPAIRMENT: CONTRAINDICATED in CrCl < 30 mL/min or eGFR < 30. Patients with CKD Stage 4-5 (GFR < 30) must NOT receive NSAIDs including naproxen. (2) Active peptic ulcer or GI bleeding. (3) Third trimester of pregnancy (premature ductus arteriosus closure). (4) Severe hepatic impairment. (5) History of NSAID-induced asthma. (6) Post-coronary artery bypass graft surgery. Safe alternatives for pain in CKD patients: Paracetamol (acetaminophen) is the preferred first-line analgesic for mild-moderate pain in CKD. Avoid NSAIDs in all patients with CrCl < 30 mL/min. Topical NSAIDs (diclofenac gel) have minimal systemic absorption and may be safer."
+  },
+  {
+    "id": "cetirizine_hydrochloride_overview",
+    "drug": "Cetirizine Hydrochloride",
+    "category": "overview",
+    "text": "Cetirizine Hydrochloride (brands: Childrens Zyrtec). Uses temporarily relieves these symptoms due to hay fever or other upper respiratory allergies: runny nose sneezing itchy, watery eyes itching of the nose or throat"
+  },
+  {
+    "id": "cetirizine_hydrochloride_dosing",
+    "drug": "Cetirizine Hydrochloride",
+    "category": "dosing",
+    "text": "Directions may be taken with or without water chew or crush tablets completely before swallowing children 2 to under 6 years of age Chew and swallow 1 tablet (2.5 mg) once daily; If needed, dose can be increased to a maximum of 2 tablets (5 mg) once daily or 1 tablet (2.5 mg) every 12 hours. Do not give more than 2 tablets (5 mg) in 24 hours. adults and children 6 years and over Chew and swallow 2 tablets (5 mg) or 4 tablets (10 mg) once daily depending upon severity of symptoms; do not take more than 4 tablets (10 mg) in 24 hours. adults 65 years and over Chew and swallow 2 tablets (5 mg) once daily; do not take more than 2 tablets (5 mg) in 24 hours. children under 2 years of age ask a doctor consumers with liver or kidney disease ask a doctor"
+  },
+  {
+    "id": "cetirizine_hydrochloride_contraindications",
+    "drug": "Cetirizine Hydrochloride",
+    "category": "contraindications",
+    "text": "WARNINGS: Warnings Do not use if you have ever had an allergic reaction to this product or any of its ingredients or to an antihistamine containing hydroxyzine. Ask a doctor before use if you have liver or kidney disease. Your doctor should determine if you need a different dose. Ask a doctor or pharmacist before use if you are taking tranquilizers or sedati"
+  },
+  {
+    "id": "olanzapine_pamoate_overview",
+    "drug": "Olanzapine Pamoate",
+    "category": "overview",
+    "text": "Olanzapine Pamoate (brands: ZYPREXA Relprevv). is available only through a restricted distribution program . ZYPREXA RELPREVV must not be dispensed directly to a patient. For a patient to receive treatment, the prescriber, healthcare facility, patient, and pharmacy must all be enrolled in the ZYPREXA RELPREVV Patient Care Program. To enroll, cal 12.1 Mechanism of Action The mechanism of action of olanzapine, in the listed indications is unclear. However, the efficacy of olanzapine in schizophrenia could be mediated through a combination of dopamine and serotonin type 2 (5HT 2 ) antagonism. is an atypical antipsychotic that belongs to the thienobenzodiazepine class. The chemical designation is 10H-thieno[2,3-b][1,5]benzodiazepine, 2-methyl-4-(4-methyl-1-piperazinyl)-,4,4′-methylenebis[3-"
+  },
+  {
+    "id": "olanzapine_pamoate_dosing",
+    "drug": "Olanzapine Pamoate",
+    "category": "dosing",
+    "text": "150 mg/2 wks, 300 mg/4 wks, 210 mg/2 wks, 405 mg/4 wks, or 300 mg/2 wks. See Table 1 for dosing recommendations. ( 2.1 ) ZYPREXA RELPREVV is intended for deep intramuscular gluteal injection only. Do not administer intravenously or subcutaneously. ( 2.1 ) Be aware that there are two ZYPREXA intramuscular formulations with different dosing schedules. ZYPREXA IntraMuscular (10 mg/vial) is a short-acting formulation and should not be confused with ZYPREXA RELPREVV. ( 2.1 ) Establish tolerability with oral olanzapine prior to initiating treatment. ( 2.1 ) ZYPREXA RELPREVV doses above 405 mg every 4 weeks or 300 mg every 2 weeks have not been evaluated in clinical trials. ( 2.1 ) Use in specific populations (including renal and hepatic impaired, and pediatric population) has not been studied."
+  },
+  {
+    "id": "olanzapine_pamoate_interactions",
+    "drug": "Olanzapine Pamoate",
+    "category": "interactions",
+    "text": "cting Drugs: Caution should be used when used in combination with other centrally acting drugs and alcohol. ( 7.2 ) Antihypertensive Agents: Enhanced antihypertensive effect. ( 7.2 ) Levodopa and Dopamine Agonists: May antagonize levodopa/dopamine agonists. ( 7.2 ) Diazepam: May potentiate orthostatic hypotension. ( 7.1 , 7.2 ) Alcohol: May potentiate orthostatic hypotension. ( 7.1 ) Carbamazepine: Increased clearance of olanzapine. ( 7.1 ) Fluvoxamine: May increase olanzapine levels. ( 7.1 ) 7.1 Potential for Other Drugs to Affect Olanzapine Diazepam — The co-administration of diazepam with olanzapine potentiated the orthostatic hypotension observed with olanzapine ."
+  },
+  {
+    "id": "olanzapine_pamoate_contraindications",
+    "drug": "Olanzapine Pamoate",
+    "category": "contraindications",
+    "text": "one. None. WARNINGS: lderly Patients with Dementia-Related Psychosis: Increased risk of death and increased incidence of cerebrovascular adverse events (e.g. stroke, transient ischemic attack). ( 5.3 ) Suicide: The possibility of a suicide attempt is inherent in schizophrenia, and close supervision of high-risk patients should accompany drug therapy. ( 5.4 ) Neurolepti"
+  },
+  {
+    "id": "diazepam_overview",
+    "drug": "Diazepam",
+    "category": "overview",
+    "text": "Diazepam (brands: Diazepam). INDICATIONS AND USAGE Diazepam tablets are indicated for the management of anxiety disorders or for the short-term relief of the symptoms of anxiety. Anxiety or tension associated with the stress of everyday life usually does not require treatment with an anxiolytic. In acute alcohol withdrawal, dia CLINICAL PHARMACOLOGY Diazepam is a benzodiazepine that exerts anxiolytic, sedative, muscle-relaxant, anticonvulsant and amnestic effects. Most of these effects are thought to result from a facilitation of the action of gamma aminobutyric acid (GABA), an inhibitory neurotransmitter in the central ne DESCRIPTION Diazepam is a benzodiazepine derivative. The chemical name of diazepam is 7-Chloro-1,3-dihydro-1-methyl-5-phenyl- -1,4-benzodiazepin-2-one. It is a colorless to light yellow crystalline co"
+  },
+  {
+    "id": "diazepam_dosing",
+    "drug": "Diazepam",
+    "category": "dosing",
+    "text": "DOSAGE AND ADMINISTRATION Dosage should be individualized for maximum beneficial effect. While the usual daily dosages given below will meet the needs of most patients, there will be some who may require higher doses. In such cases dosage should be increased cautiously to avoid adverse effects. ADULTS: USUAL DAILY DOSE: Management of Anxiety Disorders and Relief of Symptoms of Anxiety. Depending upon severity of symptoms—2 mg to 10 mg, 2 to 4 times daily Symptomatic Relief in Acute Alcohol Withdrawal. 10 mg, 3 or 4 times during the first 24 hours, reducing to 5 mg, 3 or 4 times daily as needed. Adjunctively for Relief of Skeletal Muscle Spasm. 2 mg to 10 mg, 3 or 4 times daily Adjunctively in Convulsive Disorders. Elderly: Geriatric Use In elderly patients, it is recommended that the dosage be limited to the smallest effective amount to preclude the development of ataxia"
+  },
+  {
+    "id": "diazepam_interactions",
+    "drug": "Diazepam",
+    "category": "interactions",
+    "text": "Drug Interactions Opioids The concomitant use of benzodiazepines and opioids increases the risk of respiratory depression because of actions at different receptor sites in the CNS that control respiration. Benzodiazepines interact at GABA A sites and opioids interact primarily at mu receptors. When benzodiazepines and opioids are combined, the potential for benzodiazepines to significantly worsen opioid-related respiratory depression exists. Limit dosage and duration of concomitant use of benzodiazepines and opioids, and monitor patients closely for respiratory depression and sedation."
+  },
+  {
+    "id": "diazepam_contraindications",
+    "drug": "Diazepam",
+    "category": "contraindications",
+    "text": "CONTRAINDICATIONS Diazepam tablets are contraindicated in patients with a known hypersensitivity to diazepam and, because of lack of sufficient clinical experience, in pediatric patients under 6 months of age. Diazepam tablets are also contraindicated in patients with myasthenia gravis, severe respiratory insufficiency, severe hepatic insufficiency, and sleep apnea syndrome. They may be used in patients with open-angle glaucoma who are receiving appropriate therapy, but is contraindicated in acute narrow-angle glaucoma. WARNINGS: WARNINGS Risks from Concomitant Use with Opioids Concomitant use of benzodiazepiones, including diazepam tablets, and opioids may result in profound sedation, respiratory depression, coma, and death. Because of these risks, reserve concomitant prescribing of these drugs in patients for whom alternative treatment options are inadequate. Observationa"
+  },
+  {
+    "id": "acetaminophen_and_codeine_phosphate_overview",
+    "drug": "Acetaminophen And Codeine Phosphate",
+    "category": "overview",
+    "text": "Acetaminophen And Codeine Phosphate (brands: ACETAMINOPHEN AND CODEINE PHOSPHATE). INDICATIONS AND USAGE Acetaminophen and codeine phosphate tablets are indicated for the management of mild to moderate pain, where treatment with an opioid is appropriate and for which alternative treatments are inadequate. Limitations of Use Because of the risks of addiction, abuse, and misuse, wit CLINICAL PHARMACOLOGY Mechanism of Action Codeine is an opioid agonist relatively selective for the mu-opioid receptor, but with a much weaker affinity than morphine. The analgesic properties of codeine have been speculated to come from its conversion to morphine, although the exact mechanism of ana DESCRIPTION Acetaminophen and Codeine Phosphate Tablets, USP are supplied in tablet form for oral administration. Acetaminophen, 4'-hydroxyacetanilide, a slightly bitter, white, odorless, crystalline"
+  },
+  {
+    "id": "acetaminophen_and_codeine_phosphate_dosing",
+    "drug": "Acetaminophen And Codeine Phosphate",
+    "category": "dosing",
+    "text": "DOSAGE AND ADMINISTRATION Important Dosage and Administration Instructions Use the lowest effective dosage for the shortest duration consistent with individual patient treatment goals (see WARNINGS ). Initiate the dosing regimen for each patient individually, taking into account the patient's severity of pain, patient response, prior analgesic treatment experience, and risk factors for addiction, abuse, and misuse (see WARNINGS ). Monitor patients closely for respiratory depression, especially within the first 24–72 hours of initiating therapy and following dosage increases with acetaminophen and codeine phosphate tablets and adjust the dosage accordingly (see WARNINGS ). Elderly: Geriatric Use Elderly patients (aged 65 years or older) may have increased sensitivity to acetaminophen and codeine phosphate tablets. In general, use"
+  },
+  {
+    "id": "acetaminophen_and_codeine_phosphate_interactions",
+    "drug": "Acetaminophen And Codeine Phosphate",
+    "category": "interactions",
+    "text": "Drug Interactions Anticoagulants Chronic oral acetaminophen use at a dose of 4000 mg/day has been shown to cause an increase in international normalized ratio (INR) in some patients who have been stabilized on sodium warfarin as an anticoagulant. As no studies have been performed evaluating the short term use of acetaminophen and codeine phosphate tablets in patients on oral anticoagulants, more frequent assessment of INR may be appropriate in such circumstances. CYP2D6 Inhibitors Codeine is metabolized by CYP2D6 to form morphine. The concomitant use of acetaminophen and codeine phosphate tablets and CYP2D6 inhibitors (e.g."
+  },
+  {
+    "id": "acetaminophen_and_codeine_phosphate_contraindications",
+    "drug": "Acetaminophen And Codeine Phosphate",
+    "category": "contraindications",
+    "text": "CONTRAINDICATIONS Acetaminophen and codeine phosphate tablets are contraindicated for: · All children younger than 12 years of age (see WARNINGS ) · Post-operative management in children younger than 18 years of age following tonsillectomy and/or adenoidectomy (see WARNINGS ). Acetaminophen and codeine phosphate tablets are contraindicated in patients with: · Significant respiratory depression (see WARNINGS ). · Acute or severe bronchial asthma in an unmonitored setting or in the absence of resuscitative equipment (see WARNINGS ). · Concurrent use of monoamine oxidase inhibitors (MAOIs) or use of MAOIs within the last 14 days (see WARNINGS ). · Known or suspected gastrointestinal obstruction, including paralytic ileus (see WARNINGS ). WARNINGS: WARNINGS Addiction, Abuse, and Misuse Acetaminophen and codeine phosphate tablets contain codeine."
+  },
+  {
+    "id": "olanzapine_overview",
+    "drug": "Olanzapine",
+    "category": "overview",
+    "text": "Olanzapine (brands: Olanzapine). lanzapine is an atypical antipsychotic indicated: As oral formulation for the: Treatment of schizophrenia. ( 1.1 ) Adults: Efficacy was established in three clinical trials in patients with schizophrenia: two 6-week trials and one maintenance trial. ( 14.1 ) Adolescents (ages 13-17): Efficacy was es 12.1 Mechanism of Action The mechanism of action of olanzapine, in the listed indications is unclear. However, the efficacy of olanzapine in schizophrenia could be mediated through a combination of dopamine and serotonin type 2 (5HT2) antagonism. lanzapine is an atypical antipsychotic that belongs to the thienobenzodiazepine class. The chemical designation is 2-methyl-4-(4-methyl-1-piperazinyl)- -thieno[2,3- b ] [1,5]benzodiazepine. The molecu"
+  },
+  {
+    "id": "olanzapine_dosing",
+    "drug": "Olanzapine",
+    "category": "dosing",
+    "text": "chizophrenia in adults ( 2.1 ) Oral: Start at 5 mg to 10 mg once daily; Target: 10 mg/day within several days Schizophrenia in adolescents ( 2.1 ) Oral: Start at 2.5 mg to 5 mg once daily; Target: 10 mg/day Bipolar I Disorder (manic or mixed episodes) in adults ( 2.2 ) Oral: Start at 10 mg or 15 mg once daily Bipolar I Disorder (manic or mixed episodes) in adolescents ( 2.2 ) Oral: Start at 2.5 mg to 5 mg once daily; Target: 10 mg/day Bipolar I Disorder (manic or mixed episodes) with lithium or valproate in adults ( 2.2 ) Oral: Start at 10 mg once daily Depressive Episodes associated with Bipolar I Disorder in adults ( 2. Renal: hen using olanzapine and fluoxetine in combination, also refer to the Use in Specific Populations section of the package insert for Symbyax. Pregnancy: May cause extrapyramidal and/or withdrawal symptoms in neonates with third trimester exposure. ( 8 Elderly: 8."
+  },
+  {
+    "id": "olanzapine_interactions",
+    "drug": "Olanzapine",
+    "category": "interactions",
+    "text": "he risks of using olanzapine in combination with other drugs have not been extensively evaluated in systematic studies. Diazepam: May potentiate orthostatic hypotension. ( 7.1 , 7.2 ) Alcohol: May potentiate orthostatic hypotension. ( 7.1 ) Carbamazepine: Increased clearance of olanzapine. ( 7.1 ) Fluvoxamine: May increase olanzapine levels. ( 7.1 ) Olanzapine and Fluoxetine in Combination: Also refer to the Drug Interactions section of the package insert for Symbyax. ( 7.1 ) CNS Acting Drugs: Caution should be used when taken in combination with other centrally acting drugs and alcohol. ( 7.2 ) Antihypertensive Agents: Enhanced antihypertensive effect. ( 7.2 ) Levodopa and Dopamine Agonists: May antagonize levodopa/dopamine agonists. ( 7."
+  },
+  {
+    "id": "olanzapine_contraindications",
+    "drug": "Olanzapine",
+    "category": "contraindications",
+    "text": "one with olanzapine monotherapy. When using olanzapine and fluoxetine in combination, also refer to the Contraindications section of the package insert for Symbyax. For specific information about the contraindications of lithium or valproate, refer to the Contraindications section of the package inserts for these other products. None with olanzapine monotherapy.( 4 ) When using olanzapine and fluoxetine in combination, also refer to the Contraindications section of the package insert for Symbyax ® . ( 4 ) When using olanzapine in combination with lithium or valproate, refer to the Contraindications section of the package inserts for those products. ( 4 ) WARNINGS: hen using olanzapine and fluoxetine in combination, also refer to the Warnings and Precautions section of the package insert for Symbyax."
+  },
+  {
+    "id": "lisinopril_and_hydrochlorothiazide_tablets_overview",
+    "drug": "Lisinopril And Hydrochlorothiazide Tablets",
+    "category": "overview",
+    "text": "Lisinopril And Hydrochlorothiazide Tablets (brands: Lisinopril and Hydrochlorothiazide). INDICATIONS AND USAGE Lisinopril and hydrochlorothiazide tablets are indicated for the treatment of hypertension, to lower blood pressure. Lowering blood pressure lowers the risk of fatal and non-fatal cardiovascular events, primarily strokes and myocardial infarctions. These benefits have been seen Mechanism of Action Lisinopril inhibits angiotensin-converting enzyme (ACE) in human subjects and animals. ACE is a peptidyl dipeptidase that catalyzes the conversion of angiotensin I to the vasoconstrictor substance, angiotensin II. Angiotensin II also stimulates aldosterone secretion by the adrena DESCRIPTION Lisinopril and hydrochlorothiazide tablets combine an angiotensin converting enzyme inhibitor, lisinopril, and a diuretic, hydrochlorothiazide. Lisinopril, a synthetic peptide derivative,"
+  },
+  {
+    "id": "lisinopril_and_hydrochlorothiazide_tablets_dosing",
+    "drug": "Lisinopril And Hydrochlorothiazide Tablets",
+    "category": "dosing",
+    "text": "DOSAGE AND ADMINISTRATION Lisinopril monotherapy is an effective treatment of hypertension in once-daily doses of 10 mg to 80 mg, while hydrochlorothiazide monotherapy is effective in doses of 12.5 mg to 50 mg per day. In clinical trials of lisinopril/hydrochlorothiazide combination therapy using lisinopril doses of 10 mg to 80 mg and hydrochlorothiazide doses of 6.25 mg to 50 mg, the antihypertensive response rates generally increased with increasing dose of either component. The side effects (see WARNINGS ) of lisinopril are generally rare and apparently independent of dose; those of hydrochlorothiazide are a mixture of dose-dependent phenomena (primarily hypokalemia) and dose-independent phenomena (e.g., pancreatitis), the former much more common than the latter."
+  },
+  {
+    "id": "lisinopril_and_hydrochlorothiazide_tablets_interactions",
+    "drug": "Lisinopril And Hydrochlorothiazide Tablets",
+    "category": "interactions",
+    "text": "Drug Interactions Lisinopril Hypotension - Patients on Diuretic Therapy: Patients on diuretics and especially those in whom diuretic therapy was recently instituted, may occasionally experience an excessive reduction of blood pressure after initiation of therapy with lisinopril. The possibility of hypotensive effects with lisinopril can be minimized by either discontinuing the diuretic or increasing the salt intake prior to initiation of treatment with lisinopril. If it is necessary to continue the diuretic, initiate therapy with lisinopril at a dose of 5 mg daily, and provide close medical supervision after the initial dose for at least two hours and until blood pressure has stabilized for at least an additional hour. (See WARNINGS , and DOSAGE AND ADMINISTRATION ."
+  },
+  {
+    "id": "lisinopril_and_hydrochlorothiazide_tablets_contraindications",
+    "drug": "Lisinopril And Hydrochlorothiazide Tablets",
+    "category": "contraindications",
+    "text": "CONTRAINDICATIONS Lisinopril and hydrochlorothiazide tablets are contraindicated in patients who are hypersensitive to any component of this product and in patients with a history of angioedema related to previous treatment with an angiotensin converting enzyme inhibitor and in patients with hereditary or idiopathic angioedema. Because of the hydrochlorothiazide component, this product is contraindicated in patients with anuria or hypersensitivity to other sulfonamide-derived drugs. Lisinopril and hydrochlorothiazide tablets are contraindicated in combination with a neprilysin inhibitor (e.g., sacubitril). Do not administer lisinopril and hydrochlorothiazide tablets within 36 hours of switching to or from sacubitril/valsartan, a neprilysin inhibitor (see WARNINGS )."
+  },
+  {
+    "id": "lisinopril_overview",
+    "drug": "Lisinopril",
+    "category": "overview",
+    "text": "Lisinopril (brands: Zestril). estril is an angiotensin converting enzyme (ACE) inhibitor indicated for: Treatment of hypertension in adults and pediatric patients 6 years of age and older ( 1.1 ) Adjunct therapy for heart failure ( 1.2 ) Treatment of Acute Myocardial Infarction ( 1.3 ) 1.1 Hypertension Zestril is indicated for t 12.1 Mechanism of Action Lisinopril inhibits angiotensin-converting enzyme (ACE) in human subjects and animals. ACE is a peptidyl dipeptidase that catalyzes the conversion of angiotensin I to the vasoconstrictor substance, angiotensin II. Angiotensin II also stimulates aldosterone secretion by the a isinopril is an oral long-acting angiotensin converting enzyme (ACE) inhibitor. Lisinopril, a synthetic peptide derivative, is chemically described as (S)-1-[N2-(1-carboxy-3-phenylpropyl)-L-lysyl]-L-p"
+  },
+  {
+    "id": "lisinopril_dosing",
+    "drug": "Lisinopril",
+    "category": "dosing",
+    "text": "ypertension: Initial adult dose is 10 mg once daily. Titrate up to 40 mg daily based on blood pressure response. Initiate patients on diuretics at 5 mg once daily ( 2.1 ) Pediatric patients with glomerular filtration rate > 30 mL/min/1.73m 2 : Initial dose in patients 6 years of age and older is 0.07 mg per kg (up to 5 mg total) once daily ( 2.1 ) Heart Failure: Initiate with 5 mg once daily. Increase dose as tolerated to 40 mg daily ( 2.2 ) Acute Myocardial Infarction (MI): Give 5 mg within 24 hours of MI. Followed by 5 mg after 24 hours, then 10 mg once daily ( 2.3 ) Renal Impairment: For patients with creatinine clearance ≥ 10 mL/min and ≤ 30 mL/min, halve usual initial dose. For patients with creatinine clearance < 10 mL/min or on hemodialysis, the recommended initial dose is 2. Renal: actation: Advise not to breastfeed. ( 8."
+  },
+  {
+    "id": "lisinopril_contraindications",
+    "drug": "Lisinopril",
+    "category": "contraindications",
+    "text": "estril is contraindicated in combination with a neprilysin inhibitor (e.g., sacubitril). Do not administer Zestril within 36 hours of switching to or from sacubitril/valsartan, a neprilysin inhibitor [ see Warnings and Precautions (5.2)] . Zestril is contraindicated in patients with: a history of angioedema or hypersensitivity related to previous treatment with an angiotensin converting enzyme inhibitor hereditary or idiopathic angioedema Do not co-administer aliskiren with ZESTRIL in patients with diabetes . Angioedema or a history of hereditary or idiopathic angioedema ( 4 ) Hypersensitivity ( 4 ) Co-administration of aliskiren with Zestril in patients with diabetes ( 4 , 7.4 ) WARNINGS: ngioedema: Discontinue Zestril, provide appropriate therapy and monitor until resolved ( 5.2 ) Renal impairment: Monitor renal function periodically ( 5."
+  },
+  {
+    "id": "lisinopril_hctz_overview",
+    "drug": "Lisinopril/Hctz",
+    "category": "overview",
+    "text": "Lisinopril/Hctz (brands: Lisinopril/HCTZ). Lisinopril and hydrochlorothiazide tablets are indicated for the treatment of hypertension, to lower blood pressure. Lowering blood pressure lowers the risk of fatal and non-fatal cardiovascular events, primarily strokes and myocardial infarctions. These benefits have been seen in controlled trials Lisinopril-Hydrochlorothiazide As a result of its diuretic effects, hydrochlorothiazide increases plasma renin activity, increases aldosterone secretion, and decreases serum potassium. Administration of lisinopril blocks the renin-angiotensin-aldosterone axis and tends to reverse the potassium loss Lisinopril and hydrochlorothiazide tablets combine an angiotensin converting enzyme inhibitor, lisinopril, and a diuretic, hydrochlorothiazide. Lisinopril, a synthetic peptide derivative, is an oral l"
+  },
+  {
+    "id": "lisinopril_hctz_dosing",
+    "drug": "Lisinopril/Hctz",
+    "category": "dosing",
+    "text": "Lisinopril monotherapy is an effective treatment of hypertension in once-daily doses of 10 mg to 80 mg, while hydrochlorothiazide monotherapy is effective in doses of 12.5 mg to 50 mg per day. In clinical trials of lisinopril/hydrochlorothiazide combination therapy using lisinopril doses of 10 mg to 80 mg and hydrochlorothiazide doses of 6.25 mg to 50 mg, the antihypertensive response rates generally increased with increasing dose of either component. The side effects (see WARNINGS) of lisinopril are generally rare and apparently independent of dose; those of hydrochlorothiazide are a mixture of dose-dependent phenomena (primarily hypokalemia) and dose-independent phenomena (e.g., pancreatitis), the former much more common than the latter."
+  },
+  {
+    "id": "lisinopril_hctz_contraindications",
+    "drug": "Lisinopril/Hctz",
+    "category": "contraindications",
+    "text": "Lisinopril and hydrochlorothiazide tablets are contraindicated in patients who are hypersensitive to any component of this product and in patients with a history of angioedema related to previous treatment with an angiotensin converting enzyme inhibitor and in patients with hereditary or idiopathic angioedema. Because of the hydrochlorothiazide component, this product is contraindicated in patients with anuria or hypersensitivity to other sulfonamide-derived drugs. Lisinopril and hydrochlorothiazide tablets are contraindicated in combination with a neprilysin inhibitor (e.g., sacubitril). Do not administer lisinopril and hydrochlorothiazide tablets within 36 hours of switching to or from sacubitril/valsartan, a neprilysin inhibitor (see WARNINGS)."
   }
 ]
