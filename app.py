@@ -195,6 +195,31 @@ html, body, [class*="css"] {
 .sev-moderate { background: #FFF8E1; color: #BF6000; }
 .sev-major    { background: #FFEBEE; color: #C62828; }
 
+/* Drawer panel */
+.drawer-panel {
+    background: #fff;
+    border-radius: 16px;
+    padding: 1.5rem 1.6rem;
+    box-shadow: 0 4px 32px rgba(11,60,93,0.13);
+    border: 1px solid #CFE2F3;
+    margin-bottom: 1.5rem;
+    animation: slideDown 0.22s ease;
+}
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.feature-card {
+    display: flex; align-items: center;
+    background: #F8FBFD; border: 1px solid #e0eef8;
+    border-radius: 10px; padding: 0.75rem 1rem; margin: 0.35rem 0;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+.feature-card:hover { background: #E3F2FD; box-shadow: 0 2px 8px rgba(11,60,93,0.08); }
+.feature-card .fc-icon { font-size: 1.4rem; margin-right: 0.8rem; flex-shrink: 0; }
+.feature-card .fc-title { font-weight: 600; font-size: 0.88rem; color: #0B3C5D; }
+.feature-card .fc-sub { font-size: 0.73rem; color: #6B8CAE; margin-top: 0.1rem; }
+
 /* Scrollbar */
 ::-webkit-scrollbar       { width: 5px; }
 ::-webkit-scrollbar-thumb { background: #1A6B8A; border-radius: 3px; }
@@ -928,6 +953,9 @@ if "groq_api_key" not in st.session_state:
 if "ocr_edited" not in st.session_state:
     st.session_state.ocr_edited = {}
 
+if "drawer_open" not in st.session_state:
+    st.session_state.drawer_open = False
+
 
 # --- INJECT CSS ---
 
@@ -1007,6 +1035,50 @@ with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.caption(f"v1.0.0  ·  {datetime.now().strftime('%d %b %Y')}")
 
+
+
+# --- GLOBAL DRAWER ---
+_hdr_col, _drw_col = st.columns([8, 1])
+with _drw_col:
+    if st.button(u"☰", key="drawer_toggle", help="All Features", use_container_width=True):
+        st.session_state.drawer_open = not st.session_state.drawer_open
+        st.rerun()
+
+if st.session_state.drawer_open:
+    st.markdown("<div class='drawer-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<b style='font-size:1.05rem; color:#0B3C5D;'>🧭 All Features</b>"
+        "&emsp;<span style='font-size:0.75rem; color:#6B8CAE;'>Select a section to navigate</span>",
+        unsafe_allow_html=True,
+    )
+    st.divider()
+    _fc1, _fc2 = st.columns(2)
+    _FEATURES = [
+        (u"🏠", "Dashboard",             "Metrics & activity feed"),
+        (u"📋", "Prescription Scanner",  "OCR + drug extraction"),
+        (u"💬", "Drug Interaction Chat", "AI clinical pharmacist"),
+        (u"🔍", "Drug Lookup",           "Search drug profiles"),
+        (u"⚙️",  "Settings",           "Configure connections & API keys"),
+    ]
+    for _idx, (_ficon, _ftitle, _fsub) in enumerate(_FEATURES):
+        _fcol = _fc1 if _idx % 2 == 0 else _fc2
+        with _fcol:
+            st.markdown(
+                f"<div class='feature-card'>"
+                f"<span class='fc-icon'>{_ficon}</span>"
+                f"<div><div class='fc-title'>{_ftitle}</div>"
+                f"<div class='fc-sub'>{_fsub}</div></div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(f"Open {_ftitle}", key=f"drw_{_idx}", use_container_width=True):
+                st.session_state.drawer_open = False
+                st.session_state["nav_page"] = _ftitle
+                st.rerun()
+    if st.button(u"✕  Close drawer", key="drawer_close"):
+        st.session_state.drawer_open = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # --- PAGE: DASHBOARD ---
 
@@ -1091,8 +1163,8 @@ if active_page == "Dashboard":
                 unsafe_allow_html=True,
             )
 
-        with col_actions:
-            st.markdown("#### Quick Actions")
+    with col_actions:
+        st.markdown("#### Quick Actions")
         if st.button(u"📋  Scan New Prescription", use_container_width=True):
             st.session_state["nav_page"] = "Prescription Scanner"
             st.rerun()
