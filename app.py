@@ -1,5 +1,6 @@
-import re
+﻿import re
 import streamlit as st
+import streamlit.components.v1 as _st_components
 import time
 from datetime import datetime
 import os as _os
@@ -195,53 +196,6 @@ html, body, [class*="css"] {
 .sev-moderate { background: #FFF8E1; color: #BF6000; }
 .sev-major    { background: #FFEBEE; color: #C62828; }
 
-/* Left-side drawer overlay */
-#pharma-drawer-backdrop {
-    display: none;
-    position: fixed; top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    background: rgba(0,0,0,0.32);
-    z-index: 9998;
-}
-#pharma-drawer {
-    position: fixed; top: 0; left: 0;
-    width: 292px; height: 100vh;
-    background: #fff;
-    box-shadow: 4px 0 28px rgba(11,60,93,0.18);
-    z-index: 9999;
-    padding: 1.6rem 1.4rem 2rem;
-    transform: translateX(-100%);
-    transition: transform 0.26s cubic-bezier(.4,0,.2,1);
-    overflow-y: auto;
-}
-#pharma-drawer.open { transform: translateX(0); }
-#pharma-drawer-toggle {
-    position: fixed;
-    top: 50vh; left: 0;
-    transform: translateY(-50%);
-    background: #0B3C5D;
-    color: #fff;
-    border: none; cursor: pointer;
-    padding: 0.85rem 0.45rem;
-    border-radius: 0 8px 8px 0;
-    font-size: 1.15rem;
-    z-index: 9997;
-    box-shadow: 2px 0 10px rgba(11,60,93,0.22);
-    transition: background 0.15s, box-shadow 0.15s;
-    line-height: 1;
-}
-#pharma-drawer-toggle:hover { background: #1A6B8A; box-shadow: 2px 0 14px rgba(26,107,138,0.3); }
-.dr-card {
-    display: flex; align-items: center;
-    text-decoration: none !important;
-    background: #F8FBFD; border: 1px solid #e0eef8;
-    border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 0.5rem;
-    transition: background 0.15s, box-shadow 0.15s;
-}
-.dr-card:hover { background: #E3F2FD; box-shadow: 0 2px 8px rgba(11,60,93,0.08); }
-.dr-icon { font-size: 1.35rem; margin-right: 0.8rem; flex-shrink: 0; }
-.dr-title { font-weight: 600; font-size: 0.9rem; color: #0B3C5D; display: block; }
-.dr-sub   { font-size: 0.72rem; color: #6B8CAE; }
 
 /* Scrollbar */
 ::-webkit-scrollbar       { width: 5px; }
@@ -1071,51 +1025,9 @@ with st.sidebar:
 
 
 
-# --- GLOBAL LEFT DRAWER (HTML/CSS/JS overlay) ---
-st.markdown(r"""
-<div id="pharma-drawer-backdrop" onclick="pharmaCloseDrawer()"></div>
+# --- GLOBAL LEFT DRAWER (injected via window.parent) ---
+_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\'],\n    [\'\\u2699\\uFE0F\',\'Settings\',\'Configure connections &amp; API keys\']\n  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
 
-<div id="pharma-drawer">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.9rem;">
-    <span style="font-size:1.08rem;font-weight:700;color:#0B3C5D;">&#129517; All Features</span>
-    <button onclick="pharmaCloseDrawer()" style="background:none;border:none;cursor:pointer;font-size:1.5rem;color:#6B8CAE;padding:0;line-height:1;">&#215;</button>
-  </div>
-  <hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">
-  <a href="?nav=Dashboard" class="dr-card">
-    <span class="dr-icon">&#127968;</span>
-    <span><span class="dr-title">Dashboard</span><span class="dr-sub">Metrics &amp; activity feed</span></span>
-  </a>
-  <a href="?nav=Prescription Scanner" class="dr-card">
-    <span class="dr-icon">&#128203;</span>
-    <span><span class="dr-title">Prescription Scanner</span><span class="dr-sub">OCR + drug extraction</span></span>
-  </a>
-  <a href="?nav=Drug Interaction Chat" class="dr-card">
-    <span class="dr-icon">&#128172;</span>
-    <span><span class="dr-title">Drug Interaction Chat</span><span class="dr-sub">AI clinical pharmacist</span></span>
-  </a>
-  <a href="?nav=Drug Lookup" class="dr-card">
-    <span class="dr-icon">&#128269;</span>
-    <span><span class="dr-title">Drug Lookup</span><span class="dr-sub">Search drug profiles</span></span>
-  </a>
-  <a href="?nav=Settings" class="dr-card">
-    <span class="dr-icon">&#9881;&#65039;</span>
-    <span><span class="dr-title">Settings</span><span class="dr-sub">Configure connections &amp; API keys</span></span>
-  </a>
-</div>
-
-<button id="pharma-drawer-toggle" onclick="pharmaOpenDrawer()" title="All Features">&#9776;</button>
-
-<script>
-function pharmaOpenDrawer() {
-  document.getElementById('pharma-drawer').classList.add('open');
-  document.getElementById('pharma-drawer-backdrop').style.display='block';
-}
-function pharmaCloseDrawer() {
-  document.getElementById('pharma-drawer').classList.remove('open');
-  document.getElementById('pharma-drawer-backdrop').style.display='none';
-}
-</script>
-""", unsafe_allow_html=True)
 
 # --- PAGE: DASHBOARD ---
 
