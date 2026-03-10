@@ -412,14 +412,14 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
 
         medications = parsed.get("medications", [])
         med_names = [
-            (str(m.get("name", "")) + " " + str(m.get("dosage", ""))).strip()
+            ((m.get("name") or "") + " " + (m.get("dosage") or "")).strip()
             for m in medications
         ]
 
         # Drug interaction check
         interactions: list = []
         if med_names and INTERACTION_CHECKER_AVAILABLE:
-            _drug_names = [m.get("name", "").split()[0] for m in medications if m.get("name")]
+            _drug_names = [(m.get("name") or "").split()[0] for m in medications if m.get("name")]
             interactions = check_interactions(_drug_names)
 
         # Log to DB
@@ -436,8 +436,8 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         return {
             "status":        "success",
             "raw_json":      parsed,
-            "extracted_text": parsed.get("prescriber", "") + " | " + ", ".join(
-                m.get("name", "") for m in medications
+            "extracted_text": (parsed.get("prescriber") or "") + " | " + ", ".join(
+                (m.get("name") or "") for m in medications
             ),
             "medications":   med_names,
             "parsed_meds":   medications,
