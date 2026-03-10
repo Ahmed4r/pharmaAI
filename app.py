@@ -316,7 +316,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         parsed = json.loads(json_str)
         medications = parsed.get("medications") or []
         med_names = [
-            (m.get("name", "") + " " + m.get("dosage", "")).strip()
+           (str(m.get("name") or "") + " " + str(m.get("dosage") or "")).strip()
             for m in medications
         ]
 
@@ -1523,7 +1523,7 @@ elif active_page == "Prescription Scanner":
                     unsafe_allow_html=True,
                 )
                 if st.button(
-                    "&#128269;&#65039;  Run Error Detector (Tesseract.js)",
+                    "&#128269;&#65039; Detect Errors & Interactions",
                     use_container_width=True, key="run_safety_btn",
                 ):
                     with st.spinner(
@@ -1721,44 +1721,7 @@ elif active_page == "Prescription Scanner":
                         )
 
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔎  Check Drug Interactions",
-                         use_container_width=True, key="check_inter_btn"):
-                with st.spinner("Querying interaction database..."):
-                    _ixs = check_drug_interactions(ocr.get("medications", []))
-                if _ixs:
-                    try:
-                        from database import log_event as _le
-                        _ms2 = max(
-                            (_i2.get("severity","minor") for _i2 in _ixs),
-                            key=lambda s: {"major":2,"moderate":1,"minor":0}.get(s,0),
-                            default="minor",
-                        )
-                        _le("interaction_flagged", {
-                            "drugs": [_i2.get("drug_a","") for _i2 in _ixs[:3]],
-                            "count": len(_ixs), "severity": _ms2,
-                            "has_major": any(_i2.get("severity")=="major" for _i2 in _ixs),
-                        })
-                    except Exception:
-                        pass
-                st.markdown("**Interaction Report:**")
-                if _ixs:
-                    for _ix in _ixs:
-                        _s = _ix["severity"]
-                        st.markdown(
-                            f"<div class='custom-alert alert-warning'>"
-                            f"<span class='sev-badge sev-{_s}'>{_s}</span>"
-                            f"&ensp;<strong>{_ix['drug_a']}</strong>"
-                            f" &harr; <strong>{_ix['drug_b']}</strong><br>"
-                            f"<span style='font-size:.86rem;margin-top:.3rem;display:block;'>"
-                            f"{_ix['description']}</span></div>",
-                            unsafe_allow_html=True,
-                        )
-                else:
-                    st.markdown(
-                        "<div class='custom-alert alert-success'>"
-                        "✅  No significant interactions detected.</div>",
-                        unsafe_allow_html=True,
-                    )
+        
         else:
             st.markdown(
                 """
