@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import time
 from datetime import datetime
@@ -16,7 +17,10 @@ except ImportError:
     DOSING_VALIDATOR_AVAILABLE = False
 
 try:
-    from rag_engine import retrieve, build_rag_prompt, is_ready as rag_is_ready, format_citations
+    from rag_engine import (
+        retrieve, build_rag_prompt, is_ready as rag_is_ready,
+        format_citations, extract_drug_names, retrieve_interaction,
+    )
     RAG_ENGINE_AVAILABLE = True
 except ImportError:
     RAG_ENGINE_AVAILABLE = False
@@ -210,54 +214,164 @@ header            { display: none !important; }
 
 # --- PLACEHOLDER BACKEND CONNECTORS ---
 
-def process_prescription_ocr(image_bytes: bytes) -> dict:
+def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png") -> dict:
+    """OCR via Groq Vision API  llama-4-scout-17b-16e-instruct.
+    Returns a dict with 'raw_json' (parsed JSON from model), 'medications',
+    'patient', 'date', 'prescriber'. Uncertain fields contain ' (uncertain)'.
     """
-    OCR pipeline calls ocr_engine.process_image_bytes(), then enriches the
-    result with interaction checking and dosing validation where modules exist.
-    Falls back to demo data when ocr_engine dependencies are unavailable.
-    """
+    import base64
+    import json
+    import os as _os
+
     try:
-        from ocr_engine import process_image_bytes as _ocr
-        result = _ocr(image_bytes, filename="prescription.png")
+        from groq import Groq as _Groq
+    except ImportError:
+        return {
+            "status": "error", "raw_json": None,
+            "extracted_text": "[groq package not installed  run: pip install groq]",
+            "medications": [], "parsed_meds": [], "patient": "", "date": "",
+            "prescriber": "", "dea": "", "confidence": 0.0,
+            "preprocessing": [], "interactions": [],
+            "error": "groq package not installed  run: pip install groq",
+        }
 
-        if result.get("status") == "success":
-            medications = result.get("medications", [])
+    try:
+        api_key = (
+            st.session_state.get("groq_api_key", "").strip()
+            or _os.environ.get("GROQ_API_KEY", "")
+        )
+        if not api_key:
+            raise ValueError(
+                "Groq API key not set. Add it in ⚙️ Settings → OCR Engine."
+            )
 
-            if medications and INTERACTION_CHECKER_AVAILABLE:
-                drug_names = [m.split()[0] for m in medications if m]
-                result["interactions"] = check_interactions(drug_names)
+        _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
+        _mime_map = {
+            "png": "png", "jpg": "jpeg", "jpeg": "jpeg",
+            "gif": "gif", "webp": "webp", "bmp": "png",
+        }
+        _mime = f"image/{_mime_map.get(_ext, 'jpeg')}"
 
-            parsed_meds = result.get("parsed_meds", [])
-            if parsed_meds and DOSING_VALIDATOR_AVAILABLE:
-                result["dosing_validation"] = validate_prescription(parsed_meds)
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        _groq = _Groq(api_key=api_key)
 
-        return result
+        completion = _groq.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Analyse this handwritten prescription image. "
+                                "Extract ALL medications and return ONLY a valid JSON object "
+                                "with this exact structure:\n"
+                                "{\n"
+                                '  "patient": "name or null",\n'
+                                '  "date": "date string or null",\n'
+                                '  "prescriber": "doctor name or null",\n'
+                                '  "medications": [\n'
+                                '    {"name": "drug name", "dosage": "dose with unit", '
+                                '"frequency": "how often", "duration": "how long or null"}\n'
+                                "  ]\n"
+                                "}\n"
+                                "IMPORTANT: If you are unsure about any word or value, "
+                                "append ' (uncertain)' to that field's string value. "
+                                "Return ONLY the JSON object  no markdown, no explanation."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{_mime};base64,{b64}"},
+                        },
+                    ],
+                }
+            ],
+            temperature=0.0,
+            max_tokens=1024,
+            top_p=1,
+            stream=False,
+            stop=None,
+        )
+
+        raw = completion.choices[0].message.content.strip()
+
+        # Strip markdown fences if model wrapped in ```json ... ```
+        _fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        json_str = _fence.group(1) if _fence else raw
+
+        parsed = json.loads(json_str)
+        medications = parsed.get("medications") or []
+        med_names = [
+            (m.get("name", "") + " " + m.get("dosage", "")).strip()
+            for m in medications
+        ]
+
+        # Run interaction check on extracted drug generic names
+        interactions: list = []
+        if med_names and INTERACTION_CHECKER_AVAILABLE:
+            _drug_names = [
+                re.sub(r"\s*\(uncertain\)\s*", "", m.get("name", ""), flags=re.IGNORECASE).split()[0]
+                for m in medications if m.get("name")
+            ]
+            interactions = check_interactions(_drug_names)
+            if interactions:
+                try:
+                    from database import log_event as _le
+                    _ms = max(
+                        (i.get("severity", "minor") for i in interactions),
+                        key=lambda s: {"major": 2, "moderate": 1, "minor": 0}.get(s, 0),
+                        default="minor",
+                    )
+                    _le("interaction_flagged", {
+                        "drugs": _drug_names[:5], "count": len(interactions),
+                        "severity": _ms,
+                        "has_major": any(i.get("severity") == "major" for i in interactions),
+                    })
+                except Exception:
+                    pass
+
+        try:
+            from database import log_event as _le
+            _le("prescription_scanned", {
+                "drug_count": len(medications),
+                "drugs": med_names,
+                "patient": parsed.get("patient", ""),
+            })
+        except Exception:
+            pass
+
+        return {
+            "status":        "success",
+            "raw_json":      parsed,
+            "extracted_text": raw,
+            "medications":   med_names,
+            "parsed_meds":   medications,
+            "patient":       parsed.get("patient") or "",
+            "date":          parsed.get("date") or "",
+            "prescriber":    parsed.get("prescriber") or "",
+            "dea":           "",
+            "confidence":    1.0,
+            "preprocessing": ["Groq Vision", "llama-4-scout-17b"],
+            "interactions":  interactions,
+        }
 
     except Exception as exc:
         return {
             "status":        "error",
-            "extracted_text": (
-                "PRESCRIPTION\n"
-                "\n"
-                "Patient   : John Doe  (DOB: 01 Jan 1980)\n"
-                "Date      : 09 Mar 2026\n"
-                "Provider  : Dr. Sarah Mitchell, MD\n"
-                "\n"
-                "Rx 1 : Amoxicillin 500 mg    Sig: 1 cap PO TID x 7 days\n"
-                "Rx 2 : Ibuprofen 400 mg      Sig: 1 tab PO PRN q6h\n"
-                "Rx 3 : Omeprazole 20 mg      Sig: 1 cap PO QD AC breakfast\n"
-                "\n"
-                "[DEMO DATA - OCR engine unavailable: " + str(exc) + "]"
-            ),
-            "medications":    ["Amoxicillin 500mg", "Ibuprofen 400mg", "Omeprazole 20mg"],
-            "parsed_meds":    [],
-            "patient":        "John Doe",
-            "date":           "09 Mar 2026",
-            "prescriber":     "Dr. Sarah Mitchell, MD",
-            "dea":            "",
-            "confidence":     0.0,
-            "preprocessing":  [],
-            "error":          str(exc),
+            "raw_json":      None,
+            "extracted_text": f"[Groq OCR error: {exc}]",
+            "medications":   [],
+            "parsed_meds":   [],
+            "patient":       "",
+            "date":          "",
+            "prescriber":    "",
+            "dea":           "",
+            "confidence":    0.0,
+            "preprocessing": [],
+            "interactions":  [],
+            "error":         str(exc),
         }
 
 
@@ -312,7 +426,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     for _abbr, _full in _SPELL.items():
         _msg = _re.sub(r"\b" + _abbr + r"\b", _full, _msg, flags=_re.IGNORECASE)
 
-    # 2. Detect clinical query
+    # 2. Detect clinical + intent flags
     _CLINICAL_RE = _re.compile(
         r"\b(mg|mcg|tablet|capsule|dose|drug|medication|medicine|prescription|"
         r"interaction|warfarin|metformin|aspirin|amoxicillin|ibuprofen|omeprazole|"
@@ -323,76 +437,298 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     )
     _is_clinical = bool(_CLINICAL_RE.search(_msg)) or len(_msg.split()) >= 6
 
-   # 3. RAG retrieval (Enhanced Logic)
+    _DOSING_RE = _re.compile(
+        r"\b(dose|dosing|dosage|mg|mcg|mg/kg|frequency|how much|how many|"
+        r"renal.{0,20}fail|renal.{0,20}impair|kidney.{0,20}fail|crcl|"
+        r"creatinine.{0,20}clearance|dose.{0,10}adjust|adjust|reduce)\b",
+        _re.IGNORECASE,
+    )
+    _is_dosing_query   = bool(_DOSING_RE.search(_msg))
+    _needs_renal_check = bool(_re.search(
+        r"\b(renal.{0,20}fail|kidney.{0,20}fail|renal.{0,20}impair|crcl|ckd)\b",
+        _msg, _re.IGNORECASE,
+    ))
+
+    # 3. RAG retrieval - targeted, cross-contamination-resistant
     _rag_block = ""
-    rag_chunks = []
+    rag_chunks: list = []
+    _query_drugs: list[str] = []
+    _context_drug_match = True   # strict RAG guardrail: context must mention queried drugs
+    _confidence_pct = 0          # 0-100 RAG relevance score
+    _low_confidence = False      # True when confidence < 80%
+
     if _is_clinical and RAG_ENGINE_AVAILABLE:
         try:
-            # توسيع استعلام البحث لضمان جلب بيانات القصور الكلوي والجرعات
-            # تم إضافة كلمات مفتاحية (Dose, Adjustment, CrCl, Renal) لرفع دقة الـ Vector Search
-            clinical_search_query = f"{_msg} renal dose adjustment creatinine clearance crcl impairment"
-            
-            # رفعنا عدد النتائج لـ 5 لضمان تغطية الجداول الموجودة في عمق المستند
-            rag_chunks = retrieve(clinical_search_query, n_results=5) 
-            
-            if rag_chunks:
-                # ترتيب النتائج بناءً على درجة التشابه (Score)
-                scored_chunks = [c for c in rag_chunks if c.get("score", 0) >= 0.40] # عتبة قبول مرنة
-                
-                if scored_chunks:
-                    _refs = [
-                        "[{drug}] (Relevance: {score:.2f})\n{text}".format(
-                            drug=c.get("drug", "").upper(), 
-                            score=c.get("score", 0),
-                            text=c["text"]
-                        )
-                        for c in scored_chunks
+            # 3a. Identify drugs in the query
+            _query_drugs = extract_drug_names(_msg)
+
+            if _query_drugs:
+                if not _is_dosing_query:
+                    # Interaction query: verified drug-name retrieval
+                    rag_chunks = retrieve_interaction(_query_drugs, n_results=5)
+                else:
+                    # Dosing query: wider pool to catch Dosing/Adjustment sections
+                    _dose_query = (
+                        " ".join(_query_drugs)
+                        + " dose dosing renal adjustment CrCl creatinine clearance mg/kg"
+                    )
+                    rag_chunks = retrieve(_dose_query, n_results=8)
+            else:
+                _general_query = f"{_msg} renal dose adjustment creatinine clearance"
+                rag_chunks = retrieve(_general_query, n_results=5)
+
+            # 3c. Minimum relevance filter
+            scored_chunks = [c for c in rag_chunks if c.get("score", 0) >= 0.35]
+
+            # 3d. Context reranking: push Dosing/Adjustment sections to the top
+            if _is_dosing_query and scored_chunks:
+                _DOSE_CATS = {"dosing", "dose", "adjustment", "dose_adjustment", "renal_dosing"}
+                def _dose_priority(c):
+                    cat  = c.get("category", "").lower().replace(" ", "_")
+                    text = c.get("text", "").lower()
+                    top  = any(k in cat for k in _DOSE_CATS) or any(
+                        k in text for k in ("crcl", "creatinine clearance", "mg/kg", "dose adjustment")
+                    )
+                    return (0 if top else 1, -c.get("score", 0.0))
+                scored_chunks.sort(key=_dose_priority)
+
+            # 3e. Renal CrCl validation
+            _renal_data_found = False
+            if _needs_renal_check and scored_chunks:
+                _renal_data_found = any(
+                    "crcl" in c.get("text", "").lower()
+                    or "creatinine clearance" in c.get("text", "").lower()
+                    for c in scored_chunks
+                )
+
+            # 3f. Build reference block (category label included)
+            if scored_chunks:
+                drug_label = (
+                    " + ".join(d.title() for d in _query_drugs)
+                    if _query_drugs else "General"
+                )
+                _refs = [
+                    "[{drug}] [{cat}] (Relevance: {score:.2f})\n{text}".format(
+                        drug=c.get("drug", "Unknown").upper(),
+                        cat=c.get("category", "general").upper(),
+                        score=c.get("score", 0),
+                        text=c["text"],
+                    )
+                    for c in scored_chunks
+                ]
+                _rag_block = (
+                    f"\n\nVERIFIED CLINICAL REFERENCES [{drug_label}]:\n"
+                    + "\n\n".join(_refs)
+                )
+            elif _query_drugs:
+                _rag_block = (
+                    f"\n\n[KNOWLEDGE BASE NOTE: No verified data found"
+                    f" for {', '.join(_query_drugs)} in current database.]"
+                )
+
+            # 3g. Safety guardrail: warn LLM if renal CrCl data is absent
+            if _needs_renal_check and not _renal_data_found:
+                _rag_block += (
+                    "\n\n[RENAL VALIDATION NOTE: The retrieved context does NOT contain "
+                    "explicit CrCl thresholds. You MUST NOT invent creatinine clearance "
+                    "cutoffs. State 'CrCl-based dosing data not available in knowledge "
+                    "base' instead.]"
+                )
+
+            # 3h. Strict drug-name matching guardrail
+            if _query_drugs:
+                if not scored_chunks:
+                    _context_drug_match = False
+                else:
+                    _match_pats = [
+                        _re.compile(r"\b" + _re.escape(d) + r"\b", _re.IGNORECASE)
+                        for d in _query_drugs
                     ]
-                    _rag_block = "\n\nVERIFIED CLINICAL REFERENCES FOR DOSE ADJUSTMENT:\n" + "\n\n".join(_refs)
+                    _matched_chunks = [
+                        c for c in scored_chunks
+                        if any(p.search(c.get("text", "") + " " + c.get("drug", ""))
+                               for p in _match_pats)
+                    ]
+                    _context_drug_match = bool(_matched_chunks)
+
+            # 3i. Confidence score (average relevance of retrieved context)
+            if scored_chunks:
+                _avg_rag_score = (
+                    sum(c.get("score", 0.0) for c in scored_chunks)
+                    / len(scored_chunks)
+                )
+                _confidence_pct = min(100, max(0, int(_avg_rag_score * 160)))
+            _low_confidence = bool(_query_drugs) and _confidence_pct < 80
+
         except Exception as _re_err:
             print(f"RAG error: {_re_err}")
+
+    # 3j. Context mismatch: refuse answer if no chunk mentions queried drugs
+    if not _context_drug_match and _query_drugs:
+        _queried_str = ", ".join(d.title() for d in _query_drugs)
+        return (
+            f"\u26a0\ufe0f **Context Mismatch \u2014 Cannot Answer Reliably**\n\n"
+            f"The knowledge base does not contain verified information about "
+            f"**{_queried_str}** that matches your query.\n\n"
+            f"**Please consult a physical clinical reference:**\n"
+            f"- British National Formulary (BNF)\n"
+            f"- ASHP Drug Information\n"
+            f"- The drug\u2019s official Summary of Product Characteristics (SmPC)"
+        )
 
     _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
     _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
 
-    # 4. System prompt (تم تعديله لإزالة العناوين الرقمية)
-    if _is_clinical:
-      _SYS = (
-        "You are an experienced Clinical Pharmacist working in a community pharmacy.\n"
-        "Your task is to perform a professional medication safety review.\n\n"
+    # 4. Intent-aware system prompt
+    _drug_scope = (
+        f"Drugs under analysis: {', '.join(d.upper() for d in _query_drugs)}.\n"
+        if _query_drugs else ""
+    )
 
-        "You must analyze the following aspects when drugs are mentioned:\n"
+    if _is_clinical and _is_dosing_query:
+        # DOSING MODE: scan context for explicit CrCl/mL/min values to surface upfront
+        import re as _re2
+        _EXTRACT_RE = _re2.compile(
+            r"[^.\n]*(?:crcl|ml/min|creatinine clearance|dose adjustment|adjust(?:ed)? dose)"
+            r"[^.\n]*",
+            _re2.IGNORECASE,
+        )
+        _extracted_lines: list[str] = []
+        for _ec in (scored_chunks if "scored_chunks" in dir() else []):
+            for _hit in _EXTRACT_RE.findall(_ec.get("text", "")):
+                _hit = _hit.strip()
+                if _hit and _hit not in _extracted_lines:
+                    _extracted_lines.append(_hit)
+        _extracted_block = ""
+        if _extracted_lines:
+            _extracted_block = (
+                "\n\nEXTRACTED DOSING VALUES (use these to start your answer):\n"
+                + "\n".join(f"   {l}" for l in _extracted_lines[:8])
+            )
 
-        "• Drug mechanism of action\n"
-        "• Drug–drug interactions (pharmacodynamic and pharmacokinetic)\n"
-        "• Dose safety and common dosing ranges\n"
-        "• Renal dose adjustments if kidney impairment is mentioned\n"
-        "• Major side effects and contraindications\n"
-        "• Clinical red flag symptoms patients must watch for\n"
-        "• Monitoring recommendations (labs, INR, BP, glucose etc.)\n\n"
+        _renal_example = (
+            "Your answer MUST start with a line in this exact format:\n"
+            "  **For renal impairment (CrCl < X mL/min), the dose is: [DOSE]**\n"
+            "Replace X and [DOSE] with the values found in the references.\n"
+            "If multiple CrCl thresholds exist, list each as a separate bullet.\n"
+            if _needs_renal_check else ""
+        )
 
-        "You MUST prioritize the verified clinical references provided below.\n"
-        "If the answer is not present in the references say: "
-        "'Insufficient verified evidence in database.'\n\n"
+        _SYS = (
+            "You are a precise Clinical Pharmacist. "
+            "Your answer must START with the specific dose found in the sources.\n\n"
+            + _drug_scope
+            + _renal_example
+            + "EXTRACTION RULES:\n"
+            "1. Scan the references for the keywords CrCl, mL/min, Adjustment, mg/kg, "
+            "   or any explicit dosage number.\n"
+            "2. PRIORITISE sections labelled DOSING or ADJUSTMENT over general overview.\n"
+            "3. Format every dosage value in **bold markdown** so it stands out.\n"
+            "4. Use bullet points (-) for each dose tier / CrCl range.\n"
+            "5. Do NOT provide general mechanism or pharmacology unless the specific "
+            "   dose is completely absent from the references.\n"
+            "6. If the exact dose is missing say: '**Exact dosing data not available "
+            "   in knowledge base.** Consult current BNF/ASHP guidelines.'\n"
+            "7. End with: [Verify with a licensed pharmacist before clinical use]\n"
+        ) + _rag_block + _extracted_block
 
-        "Write in professional clinical pharmacist language.\n"
-        "Do NOT invent drug doses.\n"
-        "Avoid numbered lists. Use clear structured paragraphs.\n"
-        ) + _rag_block
+    elif _is_clinical:
+        # INTERACTION / GENERAL CLINICAL MODE
+        # Pre-check structured interaction DB for severity + known facts
+        _ix_data: dict | None = None
+        _is_major = False
+        _timing_rule_drugs = {"ibuprofen", "naproxen"}  # drugs where 30-min rule applies
+        _warfarin_in_query = "warfarin" in _query_drugs or "coumadin" in _msg.lower()
+        _exclude_timing_note = ""
+        if _query_drugs and INTERACTION_CHECKER_AVAILABLE:
+            try:
+                _ixs = check_interactions(_query_drugs)
+                if _ixs:
+                    _ix_data = _ixs[0]
+                    _is_major = _ix_data.get("severity", "") == "major"
+            except Exception:
+                pass
+        # If warfarin is involved, explicitly ban the 30-min COX-1 timing rule
+        if _warfarin_in_query and not (_timing_rule_drugs & set(_query_drugs)):
+            _exclude_timing_note = (
+                "CRITICAL OVERRIDE: The '30-minute timing rule' applies ONLY to "
+                "Aspirin + Ibuprofen (COX-1 competition). It does NOT apply to Warfarin. "
+                "Do NOT mention any timing rule in the context of Warfarin. "
+                "Warfarin interactions involve ANTICOAGULATION and BLEEDING RISK, not enzyme competition.\n\n"
+            )
+        # Build pre-synthesised warning block from structured DB data
+        _db_warning = ""
+        if _ix_data and _is_major:
+            _d1 = _ix_data.get("drug1", "").title()
+            _d2 = _ix_data.get("drug2", "").title()
+            _mech  = _ix_data.get("mechanism", "")
+            _desc  = _ix_data.get("description", "")
+            _action = _ix_data.get("action", "")
+            _db_warning = (
+                f"\nVERIFIED INTERACTION DATABASE ENTRY:\n"
+                f"  Pair: {_d1} + {_d2}  |  Severity: MAJOR\n"
+                f"  Mechanism: {_mech}\n"
+                f"  Clinical summary: {_desc}\n"
+                f"  Recommended action: {_action}\n"
+            )
+        _SYS = (
+            "You are a Senior Clinical Pharmacist writing a structured drug interaction report.\n\n"
+            + _drug_scope
+            + _exclude_timing_note
+            + "OUTPUT FORMAT  follow this structure exactly:\n\n"
+            "** MAJOR INTERACTION DETECTED** (or MODERATE/MINOR as appropriate)\n"
+            "**Drugs:** [Drug A] + [Drug B]\n\n"
+            "**Mechanism:**\n"
+            "Explain each drug's pathway separately  do NOT merge them.\n"
+            "Antiplatelet effects (COX-1 inhibition) are DIFFERENT from anticoagulation "
+            "(Vitamin K antagonism). State which pathway each drug uses.\n\n"
+            "**Clinical Consequence:**\n"
+            "Describe the combined effect and the specific risk (e.g., additive bleeding risk).\n\n"
+            "**Monitoring:**\n"
+            "- State specific lab tests (e.g., INR, CBC, renal function)\n"
+            "- State monitoring frequency (e.g., 'check INR weekly')\n"
+            "- State clinical signs to watch (e.g., bruising, dark/tarry stools, prolonged bleeding)\n\n"
+            "**Clinical Recommendation:**\n"
+            "State the action clearly (avoid / use with caution / dose adjustment / alternative).\n\n"
+            "STRICT RULES:\n"
+            "1. Base your answer on the verified references AND the database entry provided.\n"
+            "2. Ignore any reference about a DIFFERENT drug pair  do NOT transfer its rules.\n"
+            "3. NEVER invent INR thresholds, timing rules, or dose values not in the sources.\n"
+            "4. End with: [Verify with a licensed pharmacist before any clinical decision]\n"
+        ) + _db_warning + _rag_block
+
     else:
-       _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely."
+        _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely and concisely."
 
-    # 5. Build prompt (شيلنا الـ Seed اللي كان بيجبره يبدأ بـ 1.)
-    if _is_clinical:
-       full_prompt = (
-           f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
-           f"Patient medication question:\n{_msg}\n\n"
-           "Provide a pharmacist clinical review of the medications mentioned."
-           "Explain interactions, safety issues, dosing considerations and monitoring."
-           "Use the references if available.\n"
-           "[/INST]"
-)
-
+    # 5. Build prompt - intent-aware instruction
+    if _is_clinical and _is_dosing_query:
+        full_prompt = (
+            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
+            f"Dosing question: {_msg}\n\n"
+            "TASK: Extract ALL dosage values, CrCl thresholds, and mL/min cutoffs "
+            "directly from the references above. Format each value in **bold**. "
+            "Start your answer immediately with the dose  no introduction needed.\n"
+            "[/INST]"
+        )
+    elif _is_clinical:
+        _major_task = (
+            "TASK: Write the full structured interaction report in the exact format "
+            "specified in the system prompt. Start immediately with "
+            "'**⚠️ MAJOR INTERACTION DETECTED**'. "
+            "Bold all drug names and severity labels. "
+            "Under Monitoring, explicitly list: INR frequency, bleeding signs "
+            "(bruising, dark stools, prolonged bleeding time). "
+            "Do NOT mention COX-1 timing rules unless both drugs are NSAIDs.\n"
+            if _is_major else
+            "Provide a structured pharmacist safety review in the format specified. "
+            "Bold all severity labels and drug names.\n"
+        )
+        full_prompt = (
+            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
+            f"Clinical question: {_msg}\n\n"
+            + _major_task
+            + "[/INST]"
+        )
     else:
         full_prompt = f"<s>[INST] {_msg} [/INST]"
 
@@ -402,35 +738,54 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         resp = client.generate(
             model=_MODEL,
             prompt=full_prompt,
-            raw=True, 
+            raw=True,
             options={
                 "num_predict": 1500,
-                "temperature": 0.3, # Increased slightly to prevent early stopping كان 0.3
+                "temperature": 0.3,
                 "top_p":       0.9,
                 "num_ctx":     2048,
-                "num_gpu":     20
+                "num_gpu":     20,
             },
         )
-        
+
         answer = resp.response.strip()
 
-        # Clean up leaked tags
         for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]", "<s>", "</s>"):
             answer = answer.replace(_marker, "")
+        answer = answer.strip()
 
         if len(answer) < 15:
-            return "⚠️ لم يصدر الموديل رداً. حاول إعادة صياغة السؤال."
+            return "\u26a0\ufe0f \u0644\u0645 \u064a\u0635\u062f\u0631 \u0627\u0644\u0645\u0648\u062f\u064a\u0644 \u0631\u062f\u0651\u0627\u064b. \u062d\u0627\u0648\u0644 \u0625\u0639\u0627\u062f\u0629 \u0635\u064a\u0627\u063a\u0629 \u0627\u0644\u0633\u0624\u0627\u0644."
 
-        # Add Citations
-        scored = [c for c in rag_chunks if c.get("score", 0) >= 0.50]
+        # Add source citations for high-confidence chunks
+        scored = [c for c in rag_chunks if c.get("score", 0) >= 0.45]
         if scored:
             from rag_engine import format_citations
             answer += f"\n\n---\n{format_citations(scored)}"
-            
+
+        # Confidence warning appended when RAG relevance < 80%
+        if _low_confidence and _confidence_pct > 0:
+            answer += (
+                f"\n\n---\n"
+                f"\u26a0\ufe0f **RAG Confidence: {_confidence_pct}% "
+                f"(Below 80% threshold)**\n"
+                f"This response is based on limited or low-relevance context data. "
+                f"**Please verify with a physical clinical reference** "
+                f"(BNF, ASHP Drug Information, or official prescribing information) "
+                f"before making any clinical decisions."
+            )
+
+        try:
+            from database import log_event as _le
+            _le("query_answered", {"query": user_message[:200]})
+        except Exception:
+            pass
+
         return answer
 
     except Exception as exc:
         return _get_ram_warning(exc, _HOST)
+
 
 
 def check_drug_interactions(drug_list: list) -> list:
@@ -493,80 +848,47 @@ def check_drug_interactions(drug_list: list) -> list:
 
 
 def lookup_drug_info(drug_name: str) -> dict:
-    """Placeholder fetches comprehensive drug profile."""
-    time.sleep(0.9)
-    _db = {
-        "amoxicillin": {
-            "generic_name":      "Amoxicillin",
-            "brand_names":       ["Amoxil", "Trimox"],
-            "drug_class":        "Aminopenicillin / Beta-lactam antibiotic",
-            "mechanism":         ("Inhibits bacterial cell wall synthesis by binding to "
-                                  "penicillin-binding proteins (PBPs), preventing peptidoglycan "
-                                  "cross-linking and causing bacterial lysis."),
-            "indications":       ["Respiratory tract infections", "Urinary tract infections",
-                                  "H. pylori eradication (triple therapy)", "Dental prophylaxis"],
-            "contraindications": ["Hypersensitivity to penicillins or cephalosporins",
-                                  "Infectious mononucleosis (risk of widespread maculopapular rash)"],
-            "side_effects":      ["Diarrhoea", "Nausea", "Skin rash",
-                                  "Hypersensitivity reactions (rare: anaphylaxis)"],
-            "dosage":            "250-500 mg every 8 h  or  500-875 mg every 12 h (adult dose)",
-            "pregnancy_category":"B",
-            "renal_adjustment":  "Required when CrCl < 30 mL/min",
-        },
-        "ibuprofen": {
-            "generic_name":      "Ibuprofen",
-            "brand_names":       ["Advil", "Motrin", "Nurofen"],
-            "drug_class":        "NSAID  Non-selective COX-1 / COX-2 inhibitor",
-            "mechanism":         ("Non-selectively inhibits cyclooxygenase enzymes (COX-1 & COX-2), "
-                                  "reducing prostaglandin and thromboxane synthesis. Provides "
-                                  "analgesic, antipyretic, and anti-inflammatory effects."),
-            "indications":       ["Mildmoderate pain", "Fever", "Osteoarthritis",
-                                  "Rheumatoid arthritis", "Dysmenorrhoea"],
-            "contraindications": ["Active GI ulceration or GI bleeding",
-                                  "Severe renal or hepatic impairment",
-                                  "Third trimester of pregnancy",
-                                  "Peri-operative CABG bypass surgery"],
-            "side_effects":      ["GI irritation / dyspepsia", "Headache",
-                                  "Elevated blood pressure", "Fluid retention",
-                                  "Prolonged bleeding time"],
-            "dosage":            "200-800 mg per dose every 4-8 h (max 3200 mg/day adult)",
-            "pregnancy_category":"C  (D in 3rd trimester)",
-            "renal_adjustment":  "Avoid in severe renal impairment (eGFR < 30)",
-        },
-        "omeprazole": {
-            "generic_name":      "Omeprazole",
-            "brand_names":       ["Prilosec", "Losec", "Zegerid"],
-            "drug_class":        "Proton Pump Inhibitor (PPI)",
-            "mechanism":         ("Irreversibly inhibits the H\u207a/K\u207a-ATPase (proton pump) "
-                                  "in gastric parietal cells, suppressing both basal and "
-                                  "stimulated gastric acid secretion."),
-            "indications":       ["GERD / reflux oesophagitis", "Peptic ulcer disease",
-                                  "H. pylori eradication (triple therapy)",
-                                  "NSAID-induced gastroprotection", "Zollinger-Ellison syndrome"],
-            "contraindications": ["Hypersensitivity to benzimidazoles or PPIs",
-                                  "Concurrent rilpivirine-containing antiretroviral regimens"],
-            "side_effects":      ["Headache", "Nausea", "Abdominal pain",
-                                  "Long-term (>1 yr): hypomagnesaemia, C. difficile risk, "
-                                  "vitamin B12 deficiency"],
-            "dosage":            "20-40 mg once daily before breakfast",
-            "pregnancy_category":"C",
-            "renal_adjustment":  "No dose adjustment required",
-        },
+    """Fetch drug profile from SQLite DB (drug_db); falls back to empty stub."""
+    try:
+        from drug_db import get_drug_info as _dbi
+        d = _dbi(drug_name)
+        if not d.get("error"):
+            dr = d.get("dosing_rule") or {}
+            if dr:
+                mn  = dr.get("min_dose", "")
+                mx  = dr.get("max_dose", "")
+                u   = dr.get("unit", "mg")
+                frq = dr.get("frequency", "")
+                dosage = f"{mn}-{mx} {u} {frq}".strip("- ")
+                renal  = dr.get("renal_adjustment") or ""
+            else:
+                dosage, renal = "", ""
+            return {
+                "generic_name":       d.get("generic_name", drug_name),
+                "brand_names":        d.get("brand_names") or [],
+                "drug_class":         d.get("drug_class", ""),
+                "mechanism":          d.get("mechanism", ""),
+                "indications":        d.get("indications") or [],
+                "contraindications":  d.get("contraindications") or [],
+                "side_effects":       d.get("side_effects") or [],
+                "dosage":             dosage,
+                "pregnancy_category": d.get("pregnancy_cat", ""),
+                "renal_adjustment":   renal,
+            }
+    except Exception:
+        pass
+    return {
+        "generic_name":       drug_name,
+        "brand_names":        [],
+        "drug_class":         "Not found in database",
+        "mechanism":          "Drug not found. Check spelling or ensure it is in the database.",
+        "indications":        [],
+        "contraindications":  [],
+        "side_effects":       [],
+        "dosage":             "",
+        "pregnancy_category": "",
+        "renal_adjustment":   "",
     }
-    key = drug_name.lower().split()[0]
-    return _db.get(key, {
-        "generic_name":      drug_name,
-        "brand_names":       [""],
-        "drug_class":        "Not found in local demo database",
-        "mechanism":         "Connect to RxNorm or DrugBank API for pharmacological data.",
-        "indications":       [],
-        "contraindications": [],
-        "side_effects":      [],
-        "dosage":            "",
-        "pregnancy_category":"",
-        "renal_adjustment":  "",
-    })
-
 
 # --- SESSION STATE ---
 
@@ -589,6 +911,12 @@ if "ocr_result" not in st.session_state:
 
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
+
+if "groq_api_key" not in st.session_state:
+    st.session_state.groq_api_key = ""
+
+if "ocr_edited" not in st.session_state:
+    st.session_state.ocr_edited = {}
 
 
 # --- INJECT CSS ---
@@ -645,24 +973,22 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # System status panel
+    # System status panel -- dynamic
+    def _sdot(on: bool) -> str:
+        return "<span style='color:#66BB6A;'>&#9679;</span>" if on else "<span style='color:#EF5350;'>&#9679;</span>"
     st.markdown(
-        """
+        f"""
         <div style='font-size:0.77rem; padding:0 0.2rem; line-height:2;'>
             <div style='font-weight:700; color:#E8F4FD; margin-bottom:0.1rem;
                         font-size:0.7rem; letter-spacing:0.08em;'>SYSTEM STATUS</div>
-            <div>
-                <span style='color:#66BB6A;'>●</span>&nbsp;
-                OCR Engine <span style='color:#90C4E0; font-size:0.7rem;'>(Tesseract)</span>
-            </div>
-            <div>
-                <span style='color:#FFA726;'>&#9679;</span>&nbsp;
-                Ollama LLM <span style='color:#90C4E0; font-size:0.7rem;'>(BioMistral)</span>
-            </div>
-            <div>
-                <span style='color:#FFA726;'>●</span>&nbsp;
-                Drug DB <span style='color:#90C4E0; font-size:0.7rem;'>(Demo mode)</span>
-            </div>
+            <div>{_sdot(True)}&nbsp;
+                OCR Engine <span style='color:#90C4E0; font-size:0.7rem;'>(Tesseract)</span></div>
+            <div>{_sdot(INTERACTION_CHECKER_AVAILABLE)}&nbsp;
+                Interaction Check <span style='color:#90C4E0; font-size:0.7rem;'>({'Active' if INTERACTION_CHECKER_AVAILABLE else 'Unavailable'})</span></div>
+            <div>{_sdot(RAG_ENGINE_AVAILABLE)}&nbsp;
+                RAG Engine <span style='color:#90C4E0; font-size:0.7rem;'>({'Indexed' if RAG_ENGINE_AVAILABLE else 'Offline'})</span></div>
+            <div>{_sdot(True)}&nbsp;
+                Drug DB <span style='color:#90C4E0; font-size:0.7rem;'>(SQLite · Live)</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -681,13 +1007,18 @@ if active_page == "Dashboard":
         unsafe_allow_html=True,
     )
 
-    # Metric row
+    # Metric row -- live from activity_log
     mc1, mc2, mc3, mc4 = st.columns(4)
+    try:
+        from database import get_stats as _gs
+        _st = _gs()
+    except Exception:
+        _st = {}
     metrics = [
-        ("🔬", "1 284", "Prescriptions Scanned"),
-        ("⚠️",  "47",    "Interactions Flagged"),
-        ("💬", "392",   "Queries Answered"),
-        ("✅", "98.2%", "Safety Compliance"),
+        ("🔬", f"{_st.get('prescription_scanned', 0):,}",  "Prescriptions Scanned"),
+        ("⚠️",  f"{_st.get('interaction_flagged', 0):,}",   "Interactions Flagged"),
+        ("💬", f"{_st.get('query_answered', 0):,}",        "Queries Answered"),
+        ("✅", f"{_st.get('safety_compliance', 100.0):.1f}%",  "Safety Compliance"),
     ]
     for col, (icon, value, label) in zip([mc1, mc2, mc3, mc4], metrics):
         with col:
@@ -706,25 +1037,52 @@ if active_page == "Dashboard":
 
     with col_feed:
         st.markdown("#### Recent Activity")
-        feed = [
-            ("10:42", "⚠️", "Interaction detected  Warfarin + Aspirin",             "warning"),
-            ("10:31", "📋", "Prescription scanned  3 medications extracted",         "info"),
-            ("10:18", "✅", "Query resolved: Metformin dosage in CKD stage 3",        "success"),
-            ("09:55", "📋", "Prescription scanned  5 medications extracted",         "info"),
-            ("09:40", "🚨", "Major interaction flagged  Clopidogrel + Omeprazole",   "danger"),
-            ("09:12", "✅", "Drug lookup: Atorvastatin  profile viewed",             "success"),
-        ]
-        for t, icon, msg, level in feed:
+        _LOG_CFG = {
+            "prescription_scanned": ("📋", "info",    "Prescription scanned"),
+            "interaction_flagged":  ("⚠️", "warning", "Interaction flagged"),
+            "query_answered":       ("✅", "success", "Query answered"),
+            "drug_lookup":          ("🔍", "info",    "Drug lookup"),
+        }
+        try:
+            from database import get_recent_logs as _grl
+            _recent = _grl(12)
+        except Exception:
+            _recent = []
+        if _recent:
+            for _entry in _recent:
+                _et   = _entry["event_type"]
+                _icon, _lvl, _lbl = _LOG_CFG.get(_et, ("•", "info", _et))
+                _meta = _entry.get("metadata", {})
+                _ts   = str(_entry.get("created_at", ""))[-8:-3] or "--:--"
+                if _et == "prescription_scanned":
+                    _n = _meta.get("drug_count", 0)
+                    _txt = f"{_lbl} -- {_n} medication{'s' if _n != 1 else ''} extracted"
+                elif _et == "interaction_flagged":
+                    _dr = " + ".join(str(x) for x in (_meta.get("drugs") or [])[:2])
+                    _txt = f"{_lbl} -- {_dr}"
+                elif _et == "query_answered":
+                    _txt = f"{_lbl}: {str(_meta.get('query', ''))[:60]}"
+                elif _et == "drug_lookup":
+                    _txt = f"{_lbl}: {str(_meta.get('drug', '')).title()} -- profile viewed"
+                else:
+                    _txt = _lbl
+                st.markdown(
+                    f"<div class='custom-alert alert-{_lvl}'>"
+                    f"<span style='opacity:.6; font-size:.8rem;'>{_ts}</span>"
+                    f"&emsp;{_icon}&ensp;{_txt}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
             st.markdown(
-                f"<div class='custom-alert alert-{level}'>"
-                f"<span style='opacity:.6; font-size:.8rem;'>{t}</span>"
-                f"&emsp;{icon}&ensp;{msg}"
-                f"</div>",
+                "<div class='custom-alert alert-info' style='text-align:center;'>"
+                "No activity recorded yet. Scan a prescription or ask the AI pharmacist a question."
+                "</div>",
                 unsafe_allow_html=True,
             )
 
-    with col_actions:
-        st.markdown("#### Quick Actions")
+        with col_actions:
+            st.markdown("#### Quick Actions")
         if st.button(u"📋  Scan New Prescription", use_container_width=True):
             st.session_state["nav_page"] = "Prescription Scanner"
             st.rerun()
@@ -739,14 +1097,37 @@ if active_page == "Dashboard":
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### Top Flagged Today")
-        for drug, sev in [("Warfarin", "major"), ("Clopidogrel", "major"),
-                          ("Ibuprofen", "moderate"), ("Metformin", "minor")]:
+        _today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            from database import get_connection as _gcx
+            import json as _jj
+            _cx = _gcx(); _cur2 = _cx.cursor()
+            _cur2.execute(
+                "SELECT metadata FROM activity_log "
+                "WHERE event_type='interaction_flagged' AND DATE(created_at)=? LIMIT 30",
+                (_today,),
+            )
+            _flagged: dict = {}
+            for _row in _cur2.fetchall():
+                _m = _jj.loads(_row[0] or "{}")
+                for _d in (_m.get("drugs") or []):
+                    _flagged[str(_d).lower()] = _m.get("severity", "moderate")
+            _cx.close()
+        except Exception:
+            _flagged = {}
+        if _flagged:
+            for _drug, _sev in list(_flagged.items())[:6]:
+                st.markdown(
+                    f"<span class='drug-tag'>{_drug.title()}</span>"
+                    f"<span class='sev-badge sev-{_sev}'>{_sev}</span>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown("")
+        else:
             st.markdown(
-                f"<span class='drug-tag'>{drug}</span>"
-                f"<span class='sev-badge sev-{sev}'>{sev}</span>",
+                "<span style='font-size:.82rem; color:#90C4E0;'>No interactions flagged today.</span>",
                 unsafe_allow_html=True,
             )
-            st.markdown("")
 
 
 # --- PAGE: PRESCRIPTION SCANNER ---
@@ -793,7 +1174,8 @@ elif active_page == "Prescription Scanner":
             if st.button("🔬  Analyse Prescription", use_container_width=True):
                 with st.spinner("Running OCR pipeline  extracting medication data..."):
                     uploaded_file.seek(0)
-                    result = process_prescription_ocr(uploaded_file.read())
+                    st.session_state.ocr_edited = {}
+                    result = process_prescription_ocr(uploaded_file.read(), filename=uploaded_file.name)
                     st.session_state.ocr_result = result
                 if result["status"] == "success":
                     stages = "  →  ".join(result.get("preprocessing", []))
@@ -838,148 +1220,231 @@ elif active_page == "Prescription Scanner":
         ocr = st.session_state.ocr_result
 
         if ocr:
-            conf_pct   = int(ocr["confidence"] * 100)
-            conf_color = "#388E3C" if conf_pct >= 90 else "#BF6000" if conf_pct >= 75 else "#C62828"
+            raw_json = ocr.get("raw_json")
 
-            st.markdown(
-                f"<div class='ocr-card'>"
-                f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
-                f"<span style='font-weight:600; color:#0B3C5D;'>Extracted Text</span>"
-                f"<span style='color:{conf_color}; font-weight:700; font-size:.83rem;'>"
-                f"OCR Confidence: {conf_pct}%</span>"
-                f"</div>"
-                f"<pre>{ocr['extracted_text']}</pre>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-            pi1, pi2 = st.columns(2)
-            with pi1:
-                st.markdown(f"**Patient:** {ocr.get('patient', '')}")
-                st.markdown(f"**Date:** {ocr.get('date', '')}")
-            with pi2:
-                st.markdown(f"**Prescriber:** {ocr.get('prescriber', '')}")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("**Detected medications:**")
-            pills_html = "".join(
-                f"<span class='drug-tag'>{m}</span>" for m in ocr["medications"]
-            )
-            st.markdown(pills_html, unsafe_allow_html=True)
-            
-            # Display drug interactions if available
-            if "interactions" in ocr and ocr["interactions"]:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### ⚠️ Drug Interaction Warnings")
-                for interaction in ocr["interactions"]:
-                    if INTERACTION_CHECKER_AVAILABLE:
-                        st.markdown(format_interaction_alert(interaction), unsafe_allow_html=True)
-                    else:
-                        severity_icons = {'major': '🚫', 'moderate': '⚠️', 'minor': 'ℹ️'}
-                        icon = severity_icons.get(interaction.get('severity', 'minor'), '•')
-                        st.warning(f"{icon} {interaction.get('drug1')} + {interaction.get('drug2')}: {interaction.get('description')}")
-            
-            # Display dosing validation if available
-            if "dosing_validation" in ocr and ocr["dosing_validation"]:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### 💊 Dosing Validation")
-                for validation in ocr["dosing_validation"]:
-                    error_type = validation.get('error_type')
-                    if error_type == 'too_high':
-                        st.error(validation.get('message'))
-                    elif error_type == 'too_low':
-                        st.warning(validation.get('message'))
-                    elif error_type == 'high' or error_type == 'low':
-                        st.info(validation.get('message'))
-                    elif error_type is None and validation.get('valid'):
-                        st.success(validation.get('message'))
-                    else:
-                        st.info(validation.get('message'))
-
-            # Structured parse table (only when real OCR ran)
-            parsed = ocr.get("parsed_meds", [])
-            if parsed:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("**Parsed prescription detail:**")
-                import pandas as pd
-                rows = [{
-                    "Drug":   m.get("name", ""),
-                    "Dose":   m.get("dose", "") + " " + m.get("unit", ""),
-                    "Sig / Directions": m.get("sig", ""),
-                } for m in parsed]
-                st.dataframe(
-                    pd.DataFrame(rows),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            # DEA number
-            dea = ocr.get("dea", "")
-            if dea:
+            #  Error banner 
+            if ocr.get("status") == "error":
                 st.markdown(
-                    f"<div class='custom-alert alert-warning'>"
-                    f"🔒 <strong>DEA:</strong> {dea}</div>",
+                    f"<div class='custom-alert alert-danger'>;&#10060; OCR failed: "
+                    f"<code style='font-size:.78rem;'>{ocr.get('error','')}</code></div>",
                     unsafe_allow_html=True,
                 )
 
-            st.markdown("<br>", unsafe_allow_html=True)
+            if raw_json:
+                #  Helpers 
+                def _is_uncertain(val):
+                    return isinstance(val, str) and "(uncertain)" in val.lower()
+                def _strip_unc(val):
+                    return re.sub(r"\s*\(uncertain\)\s*", "", val or "",
+                                  flags=re.IGNORECASE).strip()
 
-            # Optional AI refinement — triggered on demand (avoids auto-hang)
-            if st.button(u"✨  Refine with BioMistral AI", use_container_width=True, key="refine_btn"):
-                with st.spinner("Sending to BioMistral... (may take 1-2 min if model is loading)"):
-                    from ocr_engine import _refine_with_llm as _llm_fn
-                    import json as _jj
-                    _raw = st.session_state.ocr_result.get("extracted_text", "")
-                    refined = _llm_fn(_raw)
-                    if refined == _raw:
-                        st.error("❌ BioMistral did not respond — check Ollama is running (`ollama serve`) and the model is loaded.")
+                _edited = st.session_state.get("ocr_edited", {})
+
+                #  Patient / Date / Prescriber 
+                st.markdown("##### &#128203; Patient Details")
+                hc1, hc2, hc3 = st.columns(3)
+                _pat = _edited.get("patient", ocr.get("patient", ""))
+                _dt  = _edited.get("date",    ocr.get("date", ""))
+                _pre = _edited.get("prescriber", ocr.get("prescriber", ""))
+                with hc1:
+                    if _is_uncertain(ocr.get("patient", "")):
+                        st.text_input(
+                            "&#128100; Patient *(uncertain)*",
+                            value=_strip_unc(_pat), key="edit_patient",
+                        )
                     else:
-                        try:
-                            llm_data = _jj.loads(refined)
-                            if "medications" in llm_data:
-                                _meds = llm_data["medications"]
-                                st.session_state.ocr_result["parsed_meds"] = [
-                                    {"name": m.get("drug",""), "dose": m.get("dose",""),
-                                     "unit": m.get("unit",""), "sig": m.get("sig","")}
-                                    for m in _meds
-                                ]
-                                st.session_state.ocr_result["medications"] = [
-                                    (m.get("drug","") + " " + m.get("dose","") + m.get("unit","")).strip()
-                                    for m in _meds
-                                ]
-                                for _fk, _sk in (("patient","patient"),("prescriber","prescriber")):
-                                    if llm_data.get(_fk):
-                                        st.session_state.ocr_result[_sk] = llm_data[_fk]
-                                st.success(u"✅ BioMistral refined the prescription!")
-                                st.rerun()
-                            else:
-                                st.warning(u"⚠️ BioMistral returned JSON but no medications found.")
-                        except Exception:
-                            st.info(u"ℹ️ BioMistral returned non-JSON text — see updated notes below.")
-                            st.session_state.ocr_result["extracted_text"] = refined
-                            st.rerun()
+                        st.markdown(f"**&#128100; Patient**\n\n{_pat or '&mdash;'}")
+                with hc2:
+                    if _is_uncertain(ocr.get("date", "")):
+                        st.text_input(
+                            "&#128197; Date *(uncertain)*",
+                            value=_strip_unc(_dt), key="edit_date",
+                        )
+                    else:
+                        st.markdown(f"**&#128197; Date**\n\n{_dt or '&mdash;'}")
+                with hc3:
+                    if _is_uncertain(ocr.get("prescriber", "")):
+                        st.text_input(
+                            "&#129658; Prescriber *(uncertain)*",
+                            value=_strip_unc(_pre), key="edit_prescriber",
+                        )
+                    else:
+                        st.markdown(f"**&#129658; Prescriber**\n\n{_pre or '&mdash;'}")
 
-            if st.button("🔎  Check Drug Interactions", use_container_width=True):
+                st.markdown("---")
+
+                #  Medications 
+                st.markdown("##### &#128138; Detected Medications")
+                parsed_meds = raw_json.get("medications") or []
+                _any_uncertain = False
+
+                for _mi, _med in enumerate(parsed_meds):
+                    _name = _edited.get(f"med_{_mi}_name",      _med.get("name", ""))
+                    _dose = _edited.get(f"med_{_mi}_dosage",     _med.get("dosage", ""))
+                    _freq = _edited.get(f"med_{_mi}_frequency",  _med.get("frequency", ""))
+                    _dur  = _edited.get(f"med_{_mi}_duration",   _med.get("duration", ""))
+
+                    _nu = _is_uncertain(_med.get("name", ""))
+                    _du = _is_uncertain(_med.get("dosage", ""))
+                    _fu = _is_uncertain(_med.get("frequency", ""))
+                    _uu = _is_uncertain(_med.get("duration", ""))
+                    _has_unc = any([_nu, _du, _fu, _uu])
+                    if _has_unc:
+                        _any_uncertain = True
+
+                    _border = "#F9A825" if _has_unc else "#1A6B8A"
+                    _unc_badge = (
+                        " <span style='background:#FFF8E1;color:#BF6000;"
+                        "padding:1px 7px;border-radius:10px;font-size:.7rem;"
+                        "font-weight:700;'>⚠ Uncertain Fields</span>"
+                        if _has_unc else ""
+                    )
+                    st.markdown(
+                        f"<div style='border:1.5px solid {_border};border-radius:10px;"
+                        f"padding:.9rem 1.1rem;margin-bottom:.8rem;background:#fff;'>"
+                        f"<span style='font-weight:700;color:#0B3C5D;font-size:.95rem;'>"
+                        f";&#128138; Medication {_mi + 1}{_unc_badge}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    mc1, mc2, mc3, mc4 = st.columns(4)
+                    with mc1:
+                        if _nu:
+                            st.text_input("Drug Name ⚠", value=_strip_unc(_name),
+                                          key=f"edit_med_{_mi}_name")
+                        else:
+                            st.markdown(f"**Drug Name**\n\n{_strip_unc(_name) or '&mdash;'}")
+                    with mc2:
+                        if _du:
+                            st.text_input("Dosage ⚠", value=_strip_unc(_dose),
+                                          key=f"edit_med_{_mi}_dosage")
+                        else:
+                            st.markdown(f"**Dosage**\n\n{_strip_unc(_dose) or '&mdash;'}")
+                    with mc3:
+                        if _fu:
+                            st.text_input("Frequency ⚠", value=_strip_unc(_freq),
+                                          key=f"edit_med_{_mi}_frequency")
+                        else:
+                            st.markdown(f"**Frequency**\n\n{_strip_unc(_freq) or '&mdash;'}")
+                    with mc4:
+                        if _uu:
+                            st.text_input("Duration ⚠", value=_strip_unc(_dur),
+                                          key=f"edit_med_{_mi}_duration")
+                        else:
+                            st.markdown(f"**Duration**\n\n{_strip_unc(_dur) or '&mdash;'}")
+
+                #  Save corrections button 
+                if _any_uncertain:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("&#128190;  Save Corrections", use_container_width=True,
+                                 key="save_edits_btn"):
+                        _new_ed: dict = {}
+                        for _fk in ("patient", "date", "prescriber"):
+                            _kk = f"edit_{_fk}"
+                            if st.session_state.get(_kk):
+                                _new_ed[_fk] = st.session_state[_kk]
+                        for _j in range(len(parsed_meds)):
+                            for _fl in ("name", "dosage", "frequency", "duration"):
+                                _kk = f"edit_med_{_j}_{_fl}"
+                                if st.session_state.get(_kk):
+                                    _new_ed[f"med_{_j}_{_fl}"] = st.session_state[_kk]
+                        st.session_state["ocr_edited"] = _new_ed
+                        # Propagate corrections into raw_json medications
+                        _rj = st.session_state.ocr_result.get("raw_json", {})
+                        for _j, _m in enumerate((_rj.get("medications") or [])):
+                            for _fl in ("name", "dosage", "frequency", "duration"):
+                                _vv = _new_ed.get(f"med_{_j}_{_fl}")
+                                if _vv:
+                                    _m[_fl] = _vv
+                        for _fk in ("patient", "prescriber", "date"):
+                            if _new_ed.get(_fk):
+                                st.session_state.ocr_result[_fk] = _new_ed[_fk]
+                        st.success("✅ Corrections saved!")
+                        st.rerun()
+
+                st.markdown("---")
+
+                #  Drug tag pills 
+                st.markdown("**Detected medications (summary):**")
+                _STRIP_PAT = re.compile(r'\s*\(uncertain\)\s*', re.IGNORECASE)
+                _pill_html = "".join(
+                    "<span class='drug-tag'>" + _STRIP_PAT.sub('', m.get('name', '')).strip() + "</span>"
+                    for m in parsed_meds if m.get("name")
+                )
+                st.markdown(_pill_html, unsafe_allow_html=True)
+
+            else:
+                # Fallback display for error / non-JSON responses
+                conf_pct   = int(ocr.get("confidence", 0) * 100)
+                conf_color = "#388E3C" if conf_pct >= 90 else "#BF6000" if conf_pct >= 75 else "#C62828"
+                st.markdown(
+                    f"<div class='ocr-card'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                    f"<span style='font-weight:600;color:#0B3C5D;'>Response</span>"
+                    f"<span style='color:{conf_color};font-weight:700;font-size:.83rem;'>"
+                    f"Confidence: {conf_pct}%</span>"
+                    f"</div><pre>{ocr.get('extracted_text','')}</pre></div>",
+                    unsafe_allow_html=True,
+                )
+                pi1, pi2 = st.columns(2)
+                with pi1:
+                    st.markdown(f"**Patient:** {ocr.get('patient', '')} ")
+                    st.markdown(f"**Date:** {ocr.get('date', '')} ")
+                with pi2:
+                    st.markdown(f"**Prescriber:** {ocr.get('prescriber', '')} ")
+
+            #  Interaction warnings 
+            if ocr.get("interactions"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("### ⚠️ Drug Interaction Warnings")
+                for _ix in ocr["interactions"]:
+                    if INTERACTION_CHECKER_AVAILABLE:
+                        st.markdown(format_interaction_alert(_ix), unsafe_allow_html=True)
+                    else:
+                        _icon = {"major": "🚫", "moderate": "⚠️",
+                                 "minor": "ℹ️"}.get(_ix.get("severity", "minor"), "•")
+                        st.warning(
+                            f"{_icon} {_ix.get('drug1','')} + {_ix.get('drug2','')}: "
+                            f"{_ix.get('description','')}"
+                        )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔎  Check Drug Interactions",
+                         use_container_width=True, key="check_inter_btn"):
                 with st.spinner("Querying interaction database..."):
-                    interactions = check_drug_interactions(ocr["medications"])
+                    _ixs = check_drug_interactions(ocr.get("medications", []))
+                if _ixs:
+                    try:
+                        from database import log_event as _le
+                        _ms2 = max(
+                            (_i2.get("severity","minor") for _i2 in _ixs),
+                            key=lambda s: {"major":2,"moderate":1,"minor":0}.get(s,0),
+                            default="minor",
+                        )
+                        _le("interaction_flagged", {
+                            "drugs": [_i2.get("drug_a","") for _i2 in _ixs[:3]],
+                            "count": len(_ixs), "severity": _ms2,
+                            "has_major": any(_i2.get("severity")=="major" for _i2 in _ixs),
+                        })
+                    except Exception:
+                        pass
                 st.markdown("**Interaction Report:**")
-                if interactions:
-                    for ix in interactions:
-                        sev = ix["severity"]
+                if _ixs:
+                    for _ix in _ixs:
+                        _s = _ix["severity"]
                         st.markdown(
                             f"<div class='custom-alert alert-warning'>"
-                            f"<span class='sev-badge sev-{sev}'>{sev}</span>"
-                            f"&ensp;<strong>{ix['drug_a']}</strong>"
-                            f" &harr; <strong>{ix['drug_b']}</strong><br>"
-                            f"<span style='font-size:.86rem; margin-top:.3rem; display:block;'>"
-                            f"{ix['description']}</span>"
-                            f"</div>",
+                            f"<span class='sev-badge sev-{_s}'>{_s}</span>"
+                            f"&ensp;<strong>{_ix['drug_a']}</strong>"
+                            f" &harr; <strong>{_ix['drug_b']}</strong><br>"
+                            f"<span style='font-size:.86rem;margin-top:.3rem;display:block;'>"
+                            f"{_ix['description']}</span></div>",
                             unsafe_allow_html=True,
                         )
                 else:
                     st.markdown(
                         "<div class='custom-alert alert-success'>"
-                        "✅  No significant interactions detected for this prescription.</div>",
+                        "✅  No significant interactions detected.</div>",
                         unsafe_allow_html=True,
                     )
         else:
@@ -988,7 +1453,7 @@ elif active_page == "Prescription Scanner":
                 <div style='text-align:center; padding:3rem 1rem; color:#6B8CAE;
                             background:#fff; border-radius:12px;
                             border: 2px dashed #B0CEE3;'>
-                    <div style='font-size:3rem; margin-bottom:0.75rem;'></div>
+                    <div style='font-size:3rem; margin-bottom:0.75rem;'>📋</div>
                     <div style='font-size:1rem; font-weight:500;'>Awaiting prescription upload</div>
                     <div style='font-size:0.82rem; margin-top:0.35rem;'>
                         Results will appear here after analysis
@@ -1054,9 +1519,51 @@ elif active_page == "Drug Interaction Chat":
     # Chat history + optimistic pending indicator
     chat_box = st.container(height=460)
     with chat_box:
-        for msg in st.session_state.chat_history:
+        _RENAL_TRIGGER_RE = re.compile(
+            r"\b(renal|crcl|creatinine.{0,15}clearance|kidney.{0,10}fail|ml/min)\b",
+            re.IGNORECASE,
+        )
+        _RENAL_LINE_RE = re.compile(
+            r"[^\n]*(?:crcl|ml/min|creatinine\s*clearance|dose\s*adjust|"
+            r"renal\s*(?:impair|fail|dose)|kidney\s*fail)[^\n]*",
+            re.IGNORECASE,
+        )
+        for _ci, msg in enumerate(st.session_state.chat_history):
             with st.chat_message(msg["role"]):
-                st.markdown(msg["content"], unsafe_allow_html=True)
+                _content = msg["content"]
+                if msg["role"] == "assistant":
+                    _prev_query = (
+                        st.session_state.chat_history[_ci - 1]["content"]
+                        if _ci > 0 and st.session_state.chat_history[_ci - 1]["role"] == "user"
+                        else ""
+                    )
+                    _is_renal = (
+                        _RENAL_TRIGGER_RE.search(_prev_query)
+                        or _RENAL_TRIGGER_RE.search(_content)
+                    )
+                    if _is_renal:
+                        _hits = _RENAL_LINE_RE.findall(_content)
+                        _clean = [
+                            re.sub(r"\*\*(.+?)\*\*", r"\1", h).strip(" -*[]")
+                            for h in _hits if h.strip()
+                        ]
+                        _unique = list(dict.fromkeys(_clean))[:6]
+                        if _unique:
+                            _items = "".join(
+                                f"<li style=\'margin:3px 0;\'>{h}</li>"
+                                for h in _unique
+                            )
+                            st.markdown(
+                                f"<div style=\"background:#fff8e1;border-left:5px solid #f59e0b;"
+                                f"border-radius:8px;padding:12px 16px;margin-bottom:10px;\">"
+                                f"<span style=\"font-weight:700;color:#b45309;font-size:0.85rem;\">"
+                                f"\u26a0\ufe0f RENAL DOSE ADJUSTMENT DETECTED</span>"
+                                f"<ul style=\"margin:6px 0 0 0;padding-left:18px;"
+                                f"color:#78350f;font-size:0.87rem;\">"
+                                f"{_items}</ul></div>",
+                                unsafe_allow_html=True,
+                            )
+                st.markdown(_content, unsafe_allow_html=True)
 
         # Immediately show typing dots, then call LLM and replace with response
         if st.session_state.get("pending_input"):
@@ -1122,7 +1629,12 @@ elif active_page == "Drug Lookup":
 
     # Quick-access pills
     st.markdown("**Quick access:**")
-    quick_names = ["Amoxicillin", "Ibuprofen", "Omeprazole", "Metformin", "Warfarin", "Atorvastatin"]
+    try:
+        from drug_db import get_all_drugs as _gad
+        _all_d = [n.title() for n in _gad()]
+        quick_names = (_all_d + ["Amoxicillin","Ibuprofen","Omeprazole","Metformin","Warfarin","Atorvastatin"])[:8]
+    except Exception:
+        quick_names = ["Amoxicillin", "Ibuprofen", "Omeprazole", "Metformin", "Warfarin", "Atorvastatin"]
     q_cols = st.columns(len(quick_names))
     for col, qn in zip(q_cols, quick_names):
         with col:
@@ -1133,6 +1645,11 @@ elif active_page == "Drug Lookup":
     if search_triggered and drug_query:
         with st.spinner(f"Fetching profile for '{drug_query}'..."):
             info = lookup_drug_info(drug_query)
+        try:
+            from database import log_event as _le
+            _le("drug_lookup", {"drug": drug_query.lower()})
+        except Exception:
+            pass
 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1274,6 +1791,10 @@ elif active_page == "Settings":
 
     # OCR
     with st.expander("🔬  OCR Engine Configuration", expanded=False):
+        st.markdown("**Groq Vision API (prescription OCR)**")
+        st.text_input("Groq API Key", type="password", key="groq_api_key",
+                      help="Required for prescription scanning. Get yours at console.groq.com")
+        st.divider()
         ocr_engine = st.selectbox(
             "OCR Engine",
             ["Tesseract (Local)", "EasyOCR (Local)", "Google Vision API",

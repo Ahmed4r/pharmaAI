@@ -1,4 +1,4 @@
-﻿"""
+"""
 database.py
 ===========
 Creates and seeds the PharmaAI SQLite database (pharma.db).
@@ -73,6 +73,16 @@ CREATE TABLE IF NOT EXISTS interactions (
 
 CREATE INDEX IF NOT EXISTS idx_inter_drug1 ON interactions(drug1);
 CREATE INDEX IF NOT EXISTS idx_inter_drug2 ON interactions(drug2);
+
+CREATE TABLE IF NOT EXISTS activity_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT NOT NULL,
+    metadata    TEXT DEFAULT "{}",
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_event ON activity_log(event_type);
+CREATE INDEX IF NOT EXISTS idx_log_time  ON activity_log(created_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -490,6 +500,68 @@ def init_db() -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+
+def log_event(event_type: str, metadata: "dict | None" = None) -> None:
+    """Write a single event to activity_log (fire-and-forget)."""
+    try:
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO activity_log (event_type, metadata) VALUES (?, ?)",
+            (event_type, json.dumps(metadata or {})),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_stats() -> dict:
+    """Return cumulative event counts plus safety_compliance percentage."""
+    try:
+        conn = get_connection()
+        cur  = conn.cursor()
+        stats: dict = {}
+        for evt in ("prescription_scanned", "interaction_flagged", "query_answered", "drug_lookup"):
+            cur.execute("SELECT COUNT(*) FROM activity_log WHERE event_type = ?", (evt,))
+            stats[evt] = cur.fetchone()[0]
+        total = stats["prescription_scanned"]
+        if total > 0:
+            cur.execute(
+                "SELECT COUNT(*) FROM activity_log "
+                "WHERE event_type=\'interaction_flagged\' AND json_extract(metadata,\'$.has_major\')=1"
+            )
+            major_count = cur.fetchone()[0]
+            stats["safety_compliance"] = round(100.0 * max(0, total - major_count) / total, 1)
+        else:
+            stats["safety_compliance"] = 100.0
+        conn.close()
+        return stats
+    except Exception:
+        return {
+            "prescription_scanned": 0, "interaction_flagged": 0,
+            "query_answered": 0, "drug_lookup": 0, "safety_compliance": 100.0,
+        }
+
+
+def get_recent_logs(n: int = 12) -> list:
+    """Return the *n* most-recent activity_log rows as plain dicts."""
+    try:
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT event_type, metadata, created_at FROM activity_log ORDER BY id DESC LIMIT ?",
+            (n,),
+        )
+        rows = [
+            {"event_type": r[0], "metadata": json.loads(r[1] or "{}"), "created_at": r[2]}
+            for r in cur.fetchall()
+        ]
+        conn.close()
+        return rows
+    except Exception:
+        return []
 
 
 if __name__ == "__main__":

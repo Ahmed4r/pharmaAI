@@ -379,6 +379,101 @@ def build_rag_prompt(query: str, chunks: list[dict]) -> str:
     )
     return augmented
 
+# ---------------------------------------------------------------------------
+# Drug extraction + targeted interaction retrieval (anti-cross-contamination)
+# ---------------------------------------------------------------------------
+
+_KNOWN_DRUGS: set[str] = {
+    "warfarin", "aspirin", "ibuprofen", "naproxen", "paracetamol", "acetaminophen",
+    "metformin", "omeprazole", "esomeprazole", "pantoprazole", "lansoprazole",
+    "clopidogrel", "atorvastatin", "simvastatin", "rosuvastatin", "pravastatin",
+    "metronidazole", "ciprofloxacin", "amoxicillin", "amoxicillin-clavulanate",
+    "furosemide", "lisinopril", "enalapril", "ramipril", "amlodipine", "nifedipine",
+    "digoxin", "amiodarone", "sertraline", "fluoxetine", "escitalopram", "citalopram",
+    "tramadol", "codeine", "morphine", "oxycodone", "methotrexate", "prednisolone",
+    "dexamethasone", "diazepam", "lorazepam", "olanzapine", "quetiapine", "cetirizine",
+    "salbutamol", "atenolol", "bisoprolol", "carvedilol", "spironolactone",
+    "hydrochlorothiazide", "insulin", "glibenclamide", "gliclazide", "sitagliptin",
+    "heparin", "enoxaparin", "rivaroxaban", "apixaban", "dabigatran",
+}
+
+
+def extract_drug_names(query: str) -> list[str]:
+    """
+    Extract recognised drug names (generic + brand-mapped) from a free-text query.
+    Returns a deduplicated list of lowercase generic names found in the query.
+    """
+    global _brand_map_cache
+    if _brand_map_cache is None:
+        _brand_map_cache = _load_brand_map()
+
+    q_lower = query.lower()
+    found: set[str] = set()
+
+    # 1. Match against known generic names
+    for drug in _KNOWN_DRUGS:
+        if re.search(r"\b" + re.escape(drug) + r"\b", q_lower):
+            found.add(drug)
+
+    # 2. Expand brand names → generic
+    for brand, generic in _brand_map_cache.items():
+        if re.search(r"\b" + re.escape(brand) + r"\b", q_lower):
+            for token in generic.split():
+                if len(token) > 3:
+                    found.add(token)
+
+    return sorted(found)
+
+
+def retrieve_interaction(
+    drug_names: list[str],
+    n_results: int = 5,
+    host: str = "http://localhost:11434",
+) -> list[dict]:
+    """
+    Targeted, cross-contamination-resistant retrieval for drug interaction queries.
+
+    Algorithm
+    ---------
+    1. Build a specific composite query:  "<drug_a> <drug_b> interaction mechanism"
+    2. Pull a wider candidate pool (n_results × 3) from ChromaDB.
+    3. VERIFY each chunk: keep only those whose text or metadata mentions
+       at least one of the queried drug names.
+    4. Sort verified chunks by score (descending) and return top n_results.
+    5. If no chunk survives verification, return [] so the caller can admit
+       "insufficient context" rather than hallucinate a mixed answer.
+    """
+    if not drug_names:
+        return []
+
+    # Step 1 — targeted query
+    interaction_query = (
+        " ".join(drug_names)
+        + " interaction mechanism clinical safety pharmacokinetics"
+    )
+
+    # Step 2 — wide candidate pool
+    candidates = retrieve(interaction_query, n_results=n_results * 3, host=host)
+    if not candidates:
+        return []
+
+    # Step 3 — drug-name verification
+    patterns = [
+        re.compile(r"\b" + re.escape(d) + r"\b", re.IGNORECASE)
+        for d in drug_names
+    ]
+
+    verified: list[dict] = []
+    for chunk in candidates:
+        text      = chunk.get("text", "")
+        meta_drug = chunk.get("drug", "")
+        haystack  = text + " " + meta_drug
+        if any(p.search(haystack) for p in patterns):
+            verified.append(chunk)
+
+    # Step 4 — rank and cap
+    verified.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    return verified[:n_results]
 
 def format_citations(chunks: list[dict]) -> str:
     """
