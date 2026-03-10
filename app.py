@@ -225,6 +225,47 @@ header            { display: none !important; }
 
 # --- PLACEHOLDER BACKEND CONNECTORS ---
 
+
+def preprocess_prescription_image(image_bytes: bytes) -> bytes:
+    import io as _io, numpy as _np
+    try:
+        import cv2 as _cv2
+        from PIL import Image as _PILImage
+    except ImportError:
+        return image_bytes
+    try:
+        pil = _PILImage.open(_io.BytesIO(image_bytes)).convert('RGB')
+        bgr = _cv2.cvtColor(_np.array(pil), _cv2.COLOR_RGB2BGR)
+        h, w = bgr.shape[:2]
+        if max(h, w) < 1800:
+            scale = 1800 / max(h, w)
+            bgr = _cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=_cv2.INTER_CUBIC)
+        gray = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2GRAY)
+        edges = _cv2.Canny(gray, 50, 150, apertureSize=3)
+        lines = _cv2.HoughLinesP(edges, 1, _np.pi/180, 100, minLineLength=100, maxLineGap=10)
+        if lines is not None and len(lines) > 5:
+            angles = [_np.degrees(_np.arctan2(ln[0][3]-ln[0][1], ln[0][2]-ln[0][0])) for ln in lines]
+            angles = [a for a in angles if abs(a) < 45]
+            if angles:
+                angle = float(_np.median(angles))
+                if abs(angle) > 0.5:
+                    hh, ww = bgr.shape[:2]
+                    M = _cv2.getRotationMatrix2D((ww/2, hh/2), angle, 1.0)
+                    bgr = _cv2.warpAffine(bgr, M, (ww, hh), flags=_cv2.INTER_CUBIC, borderMode=_cv2.BORDER_REPLICATE)
+        lab = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2LAB)
+        l, a, b = _cv2.split(lab)
+        clahe = _cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        bgr = _cv2.cvtColor(_cv2.merge([clahe.apply(l), a, b]), _cv2.COLOR_LAB2BGR)
+        bgr = _cv2.bilateralFilter(bgr, d=9, sigmaColor=75, sigmaSpace=75)
+        blurred = _cv2.GaussianBlur(bgr, (0, 0), sigmaX=2)
+        bgr = _cv2.addWeighted(bgr, 1.5, blurred, -0.5, 0)
+        buf = _io.BytesIO()
+        _PILImage.fromarray(_cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB)).save(buf, format='PNG')
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
+
 def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png") -> dict:
     """OCR via Groq Vision API  llama-4-scout-17b-16e-instruct.
     Returns a dict with 'raw_json' (parsed JSON from model), 'medications',
@@ -264,6 +305,17 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         }
         _mime = f"image/{_mime_map.get(_ext, 'jpeg')}"
 
+        _do_pp = st.session_state.get("ocr_preprocess", True)
+        _pp_steps: list[str] = []
+        if _do_pp:
+            try:
+                _orig = len(image_bytes)
+                image_bytes = preprocess_prescription_image(image_bytes)
+                _mime = "image/png"
+                if len(image_bytes) != _orig:
+                    _pp_steps = ["Upscale", "Deskew", "CLAHE", "Bilateral", "Sharpen"]
+            except Exception:
+                pass
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         _groq = _Groq(api_key=api_key)
 
@@ -276,7 +328,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
                         {
                             "type": "text",
                             "text": (
-                                "Analyse this handwritten prescription image. "
+                                "Analyse this handwritten prescription image (may contain Arabic and/or English; ignore any background watermark stamp). "
                                 "Extract ALL medications and return ONLY a valid JSON object "
                                 "with this exact structure:\n"
                                 "{\n"
@@ -365,7 +417,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
             "prescriber":    parsed.get("prescriber") or "",
             "dea":           "",
             "confidence":    1.0,
-            "preprocessing": ["Groq Vision", "llama-4-scout-17b"],
+            "preprocessing": (_pp_steps + ["Groq Vision", "llama-4-scout-17b"]),
             "interactions":  interactions,
         }
 
