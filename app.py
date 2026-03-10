@@ -317,7 +317,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         # Configure Gemini
         _genai.configure(api_key=api_key)
         _model = _genai.GenerativeModel(
-            model_name="gemini-3.1-flash-lite-preview",
+            model_name="gemini-2.5-flash",
             generation_config={
                 "temperature": 0.1,
                 "top_p": 0.95,
@@ -328,29 +328,32 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         )
 
         _prompt = (
-            "You are an expert Egyptian Clinical Pharmacist with exceptional ability to read "
-            "handwritten Arabic and English prescriptions. Your ONLY job is to TRANSCRIBE "
-            "exactly what is written  do NOT autocorrect, do NOT substitute drug names, "
-            "do NOT guess based on clinical context.\n\n"
+            "You are an expert Egyptian Clinical Pharmacist specializing in reading "
+            "handwritten Arabic and English prescriptions.\n\n"
+            "YOUR TASK: Carefully scan every line of this prescription image and extract "
+            "each medication entry. A medication entry typically has:\n"
+            "  - Drug name (may be handwritten in Arabic or English)\n"
+            "  - Dosage amount (e.g. 5ml, 4 drops, 1 sachet, 1 tablet)\n"
+            "  - Frequency (e.g. once daily, twice daily, before meals)\n\n"
             "STRICT RULES:\n"
-            "1. TRANSCRIBE drug names character-by-character exactly as written.\n"
-            "2. If a name is in Arabic, phonetically transliterate it to English AND include "
-            "the original Arabic in parentheses. E.g.: 'Sanso Immune (سانسو إيميون)'.\n"
-            "3. For dosage/frequency: write the EXACT words/numbers on the paper.\n"
-            "4. If a field is truly unreadable, set uncertain=true and write the closest "
-            "phonetic approximation of what you see.\n"
-            "5. NEVER replace a written name with a similar-sounding known brand.\n"
-            "6. Ignore rubber stamps or circle watermarks unless they contain the doctor name.\n"
-            "7. Return ONLY a single-line compact JSON with NO embedded newlines in values.\n\n"
-            "REQUIRED JSON SCHEMA:\n"
-            "{\"patient\":\"name or null\","
+            "1. Transcribe drug names EXACTLY as written on the paper, letter by letter.\n"
+            "2. For Arabic drug names: write the phonetic English transliteration first, "
+            "then the original Arabic in parentheses. E.g. 'Sanso Immune (سانسو إيميون)'.\n"
+            "3. For dosage: extract the QUANTITY and UNIT written on the paper "
+            "(e.g. '5 ml', '4 drops', '1 sachet', '1 tablet'). If no quantity is written, "
+            "put null.\n"
+            "4. For frequency: write the exact timing/instructions written on paper.\n"
+            "5. NEVER substitute a drug name with a known brand that sounds similar.\n"
+            "6. If a word is unclear, mark uncertain=true and write your best reading.\n"
+            "7. Ignore circular rubber stamps and watermarks.\n"
+            "8. Return ONLY compact single-line JSON, no newlines inside values.\n\n"
+            "JSON SCHEMA:\n"
+            "{\"patient\":\"string or null\","
             "\"date\":\"YYYY-MM-DD or null\","
-            "\"prescriber\":\"doctor name and specialty or null\","
-            "\"doctor_specialty\":\"detected specialty or null\","
-            "\"medications\":["
-            "{\"name\":\"exact name as written\",\"dosage\":\"exact dosage as written\",\"frequency\":\"exact instructions as written\",\"uncertain\":false}"
-            "],"
-            "\"confidence_score\":0.95}"
+            "\"prescriber\":\"doctor name + specialty or null\","
+            "\"doctor_specialty\":\"specialty or null\","
+            "\"medications\":[{\"name\":\"string\",\"dosage\":\"quantity+unit or null\",\"frequency\":\"string or null\",\"uncertain\":false}],"
+            "\"confidence_score\":0.0}"
         )
 
         _response = _model.generate_content([
@@ -397,7 +400,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
             "dea":           "",
             "confidence":    float(parsed.get("confidence_score", 1.0)),
             "interactions":  interactions,
-            "preprocessing": (_pp_steps + ["Gemini 3.1 Flash Lite", "JSON Mode"]),
+            "preprocessing": (_pp_steps + ["Gemini 2.5 Flash", "JSON Mode"]),
         }
 
     except Exception as exc:
@@ -2097,7 +2100,7 @@ elif active_page == "Settings":
 
     # OCR
     with st.expander("🔬  OCR Engine Configuration", expanded=False):
-        st.markdown("**Gemini 3.1 Flash Lite Preview (prescription OCR)**")
+        st.markdown("**Gemini 2.5 Flash (prescription OCR)**")
         st.text_input("Gemini API Key", type="password", key="gemini_api_key",
                       help="Required for prescription scanning. Get yours at aistudio.google.com")
         st.divider()
