@@ -219,7 +219,6 @@ def quick_interaction_check(drug_a: str, drug_b: str) -> str:
 
 
 # ==== Ollama / BioMistral functions ====
-import streamlit as st
 
 try:
     from rag_engine import (
@@ -227,13 +226,13 @@ try:
         format_citations, extract_drug_names, retrieve_interaction,
     )
     _RAG_ENGINE_AVAILABLE = True
-except ImportError:
+except Exception:
     _RAG_ENGINE_AVAILABLE = False
 
 try:
     from interaction_checker import check_interactions
     _INTERACTION_CHECKER_AVAILABLE = True
-except ImportError:
+except Exception:
     _INTERACTION_CHECKER_AVAILABLE = False
 
     def check_interactions(drugs):
