@@ -955,7 +955,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
                 "temperature": 0.3,
                 "top_p":       0.9,
                 "num_ctx":     2048,
-                "num_gpu":     20,
+                "num_gpu":     0,
             },
         )
 
@@ -1477,140 +1477,113 @@ elif active_page == "Prescription Scanner":
                     return re.sub(r"\s*\(uncertain\)\s*", "", val or "",
                                   flags=re.IGNORECASE).strip()
 
+                #  AI disclaimer banner 
+                st.markdown(
+                    "<div style='background:#FFF8E1;border:1.5px solid #F9A825;"
+                    "border-radius:10px;padding:.65rem 1rem;margin-bottom:.9rem;"
+                    "display:flex;align-items:flex-start;gap:.6rem;'>"
+                    "<span style='font-size:1.1rem;'>&#x1F916;</span>"
+                    "<span style='font-size:.82rem;color:#7A4F00;'>"
+                    "<strong>AI may make mistakes</strong> &mdash; accuracy depends on image "
+                    "quality and handwriting clarity. Please review every field below and "
+                    "correct any errors before running the analysis."
+                    "</span></div>",
+                    unsafe_allow_html=True,
+                )
+
                 _edited = st.session_state.get("ocr_edited", {})
 
-                #  Patient / Date / Prescriber 
+                #  Patient / Date / Prescriber (always editable) 
                 st.markdown("##### &#128203; Patient Details")
                 hc1, hc2, hc3 = st.columns(3)
-                _pat = _edited.get("patient", ocr.get("patient", ""))
-                _dt  = _edited.get("date",    ocr.get("date", ""))
-                _pre = _edited.get("prescriber", ocr.get("prescriber", ""))
+                _pat = _strip_unc(_edited.get("patient", ocr.get("patient", "") or ""))
+                _dt  = _strip_unc(_edited.get("date",    ocr.get("date", "") or ""))
+                _pre = _strip_unc(_edited.get("prescriber", ocr.get("prescriber", "") or ""))
                 with hc1:
-                    if _is_uncertain(ocr.get("patient", "")):
-                        st.text_input(
-                            "&#128100; Patient *(uncertain)*",
-                            value=_strip_unc(_pat), key="edit_patient",
-                        )
-                    else:
-                        st.markdown(f"**&#128100; Patient**\n\n{_pat or '&mdash;'}")
+                    st.text_input("&#128100; Patient", value=_pat, key="edit_patient",
+                                  placeholder="e.g. Ahmed Mohamed")
                 with hc2:
-                    if _is_uncertain(ocr.get("date", "")):
-                        st.text_input(
-                            "&#128197; Date *(uncertain)*",
-                            value=_strip_unc(_dt), key="edit_date",
-                        )
-                    else:
-                        st.markdown(f"**&#128197; Date**\n\n{_dt or '&mdash;'}")
+                    st.text_input("&#128197; Date", value=_dt, key="edit_date",
+                                  placeholder="YYYY-MM-DD")
                 with hc3:
-                    if _is_uncertain(ocr.get("prescriber", "")):
-                        st.text_input(
-                            "&#129658; Prescriber *(uncertain)*",
-                            value=_strip_unc(_pre), key="edit_prescriber",
-                        )
-                    else:
-                        st.markdown(f"**&#129658; Prescriber**\n\n{_pre or '&mdash;'}")
+                    st.text_input("&#129658; Prescriber", value=_pre, key="edit_prescriber",
+                                  placeholder="Dr. Name")
 
                 st.markdown("---")
 
-                #  Medications 
+                #  Medications (all fields always editable) 
                 st.markdown("##### &#128138; Detected Medications")
                 parsed_meds = raw_json.get("medications") or []
-                _any_uncertain = False
 
                 for _mi, _med in enumerate(parsed_meds):
-                    _name = _edited.get(f"med_{_mi}_name",      _med.get("name", ""))
-                    _dose = _edited.get(f"med_{_mi}_dosage",     _med.get("dosage", ""))
-                    _freq = _edited.get(f"med_{_mi}_frequency",  _med.get("frequency", ""))
-                    _dur  = _edited.get(f"med_{_mi}_duration",   _med.get("duration", ""))
+                    _name = _strip_unc(_edited.get(f"med_{_mi}_name",     _med.get("name", "") or ""))
+                    _dose = _strip_unc(_edited.get(f"med_{_mi}_dosage",    _med.get("dosage", "") or ""))
+                    _freq = _strip_unc(_edited.get(f"med_{_mi}_frequency", _med.get("frequency", "") or ""))
+                    _dur  = _strip_unc(_edited.get(f"med_{_mi}_duration",  _med.get("duration", "") or ""))
 
-                    _nu = _is_uncertain(_med.get("name", ""))
-                    _du = _is_uncertain(_med.get("dosage", ""))
-                    _fu = _is_uncertain(_med.get("frequency", ""))
-                    _uu = _is_uncertain(_med.get("duration", ""))
-                    _has_unc = any([_nu, _du, _fu, _uu])
-                    if _has_unc:
-                        _any_uncertain = True
-
+                    _has_unc = any(
+                        _is_uncertain(_med.get(k, ""))
+                        for k in ("name", "dosage", "frequency", "duration")
+                    )
                     _border = "#F9A825" if _has_unc else "#1A6B8A"
                     _unc_badge = (
                         " <span style='background:#FFF8E1;color:#BF6000;"
                         "padding:1px 7px;border-radius:10px;font-size:.7rem;"
-                        "font-weight:700;'>⚠ Uncertain Fields</span>"
+                        "font-weight:700;'>&#9888; Uncertain</span>"
                         if _has_unc else ""
                     )
                     st.markdown(
                         f"<div style='border:1.5px solid {_border};border-radius:10px;"
-                        f"padding:.9rem 1.1rem;margin-bottom:.8rem;background:#fff;'>"
-                        f"<span style='font-weight:700;color:#0B3C5D;font-size:.95rem;'>"
-                        f";&#128138; Medication {_mi + 1}{_unc_badge}</span>"
+                        f"padding:.7rem 1rem .3rem 1rem;margin-bottom:.4rem;background:#FAFCFF;'>"
+                        f"<span style='font-weight:700;color:#0B3C5D;font-size:.9rem;'>"
+                        f"&#128138; Medication {_mi + 1}{_unc_badge}</span>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
                     mc1, mc2, mc3, mc4 = st.columns(4)
                     with mc1:
-                        if _nu:
-                            st.text_input("Drug Name ⚠", value=_strip_unc(_name),
-                                          key=f"edit_med_{_mi}_name")
-                        else:
-                            st.markdown(f"**Drug Name**\n\n{_strip_unc(_name) or '&mdash;'}")
+                        st.text_input("Drug Name", value=_name,
+                                      key=f"edit_med_{_mi}_name",
+                                      placeholder="e.g. Amoxicillin")
                     with mc2:
-                        if _du:
-                            st.text_input("Dosage ⚠", value=_strip_unc(_dose),
-                                          key=f"edit_med_{_mi}_dosage")
-                        else:
-                            st.markdown(f"**Dosage**\n\n{_strip_unc(_dose) or '&mdash;'}")
+                        st.text_input("Dosage", value=_dose,
+                                      key=f"edit_med_{_mi}_dosage",
+                                      placeholder="e.g. 5 ml")
                     with mc3:
-                        if _fu:
-                            st.text_input("Frequency ⚠", value=_strip_unc(_freq),
-                                          key=f"edit_med_{_mi}_frequency")
-                        else:
-                            st.markdown(f"**Frequency**\n\n{_strip_unc(_freq) or '&mdash;'}")
+                        st.text_input("Frequency", value=_freq,
+                                      key=f"edit_med_{_mi}_frequency",
+                                      placeholder="e.g. مرة يومياً")
                     with mc4:
-                        if _uu:
-                            st.text_input("Duration ⚠", value=_strip_unc(_dur),
-                                          key=f"edit_med_{_mi}_duration")
-                        else:
-                            st.markdown(f"**Duration**\n\n{_strip_unc(_dur) or '&mdash;'}")
+                        st.text_input("Duration", value=_dur,
+                                      key=f"edit_med_{_mi}_duration",
+                                      placeholder="e.g. 7 days")
 
-                #  Save corrections button 
-                if _any_uncertain:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("&#128190;  Save Corrections", use_container_width=True,
-                                 key="save_edits_btn"):
-                        _new_ed: dict = {}
-                        for _fk in ("patient", "date", "prescriber"):
-                            _kk = f"edit_{_fk}"
-                            if st.session_state.get(_kk):
-                                _new_ed[_fk] = st.session_state[_kk]
-                        for _j in range(len(parsed_meds)):
-                            for _fl in ("name", "dosage", "frequency", "duration"):
-                                _kk = f"edit_med_{_j}_{_fl}"
-                                if st.session_state.get(_kk):
-                                    _new_ed[f"med_{_j}_{_fl}"] = st.session_state[_kk]
-                        st.session_state["ocr_edited"] = _new_ed
-                        # Propagate corrections into raw_json medications
-                        _rj = st.session_state.ocr_result.get("raw_json", {})
-                        for _j, _m in enumerate((_rj.get("medications") or [])):
-                            for _fl in ("name", "dosage", "frequency", "duration"):
-                                _vv = _new_ed.get(f"med_{_j}_{_fl}")
-                                if _vv:
-                                    _m[_fl] = _vv
-                        for _fk in ("patient", "prescriber", "date"):
-                            if _new_ed.get(_fk):
-                                st.session_state.ocr_result[_fk] = _new_ed[_fk]
-                        st.success("✅ Corrections saved!")
-                        st.rerun()
-
-                st.markdown("---")
-
-                #  Drug tag pills 
-                st.markdown("**Detected medications (summary):**")
-                _STRIP_PAT = re.compile(r'\s*\(uncertain\)\s*', re.IGNORECASE)
-                _pill_html = "".join(
-                    "<span class='drug-tag'>" + _STRIP_PAT.sub('', m.get('name', '')).strip() + "</span>"
-                    for m in parsed_meds if m.get("name")
-                )
-                st.markdown(_pill_html, unsafe_allow_html=True)
+                #  Confirm & save button (always visible) 
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button(
+                    "✔️  Confirm & Save Corrections",
+                    use_container_width=True,
+                    key="save_edits_btn",
+                    type="primary",
+                ):
+                    _new_ed: dict = {}
+                    for _fk in ("patient", "date", "prescriber"):
+                        _new_ed[_fk] = st.session_state.get(f"edit_{_fk}", "") or ""
+                    for _j in range(len(parsed_meds)):
+                        for _fl in ("name", "dosage", "frequency", "duration"):
+                            _new_ed[f"med_{_j}_{_fl}"] = st.session_state.get(f"edit_med_{_j}_{_fl}", "") or ""
+                    st.session_state["ocr_edited"] = _new_ed
+                    # Propagate corrections into raw_json so analysis uses corrected values
+                    _rj = st.session_state.ocr_result.get("raw_json", {})
+                    for _j, _m in enumerate((_rj.get("medications") or [])):
+                        for _fl in ("name", "dosage", "frequency", "duration"):
+                            _vv = _new_ed.get(f"med_{_j}_{_fl}", "")
+                            _m[_fl] = _vv if _vv else None
+                    for _fk2 in ("patient", "prescriber", "date"):
+                        _vv2 = _new_ed.get(_fk2, "")
+                        st.session_state.ocr_result[_fk2] = _vv2 if _vv2 else None
+                    st.success("✅ Corrections saved — ready for analysis!")
+                    st.rerun()
 
                 #  PRESCRIPTION ERROR DETECTOR 
                 st.markdown("---")
