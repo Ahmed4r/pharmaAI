@@ -654,3 +654,103 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
 
 
 
+
+
+#  Groq Cloud path 
+_GROQ_CLOUD_MODEL = "llama-3.3-70b-versatile"
+
+
+def _chat_groq(system_prompt: str, user_message: str, api_key: str) -> str:
+    """Send a single request to Groq Cloud and return the response text."""
+    try:
+        from groq import Groq as _Groq
+    except ImportError:
+        return (
+            "**Groq package not installed.**\n\n"
+            "Run: `pip install groq` and restart the app."
+        )
+    if not api_key:
+        return (
+            "**Groq API key not set.**\n\n"
+            "Add `GROQ_API_KEY=...` to your `.env` file or paste it in Settings."
+        )
+    try:
+        _client = _Groq(api_key=api_key)
+        completion = _client.chat.completions.create(
+            model=_GROQ_CLOUD_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_message},
+            ],
+            temperature=0.3,
+            max_tokens=2048,
+            top_p=0.9,
+            stream=False,
+        )
+        answer = (completion.choices[0].message.content or "").strip()
+        if len(answer) < 15:
+            return "The model returned an empty response. Try rephrasing your question."
+        try:
+            from database import log_event as _le_g
+            _le_g("query_answered", {"query": user_message[:200], "model": _GROQ_CLOUD_MODEL})
+        except Exception:
+            pass
+        return answer
+    except Exception as exc:
+        return (
+            f"**Groq API error** ({_GROQ_CLOUD_MODEL})\n\n"
+            f"Error: {exc}\n\n"
+            "Check that your GROQ_API_KEY is valid and the model name is correct."
+        )
+
+
+def generate_response(
+    user_message: str,
+    chat_history: list | None = None,
+    mode: str = "local",
+    groq_api_key: str = "",
+) -> str:
+    """
+    Unified LLM router for the Drug Interaction Chat page.
+
+    Parameters
+    ----------
+    user_message  : the user's question
+    chat_history  : list of {role, content} dicts (for context only)
+    mode          : "cloud"    Groq llama-3.1-70b-versatile
+                    "local"    Ollama BioMistral-7B (default)
+    groq_api_key  : required when mode == "cloud"
+
+    Returns
+    -------
+    str  the assistant response (may contain Markdown)
+    """
+    if mode == "cloud":
+        # Re-use the same query-expansion + RAG + system-prompt logic, then send
+        # to Groq instead of Ollama.  We build the composite system prompt inline
+        # so the quality of the cloud response matches the local one.
+        import re as _re_gr
+        _SPELL_GR = {
+            "ckd":  "chronic kidney disease",
+            "inr":  "warfarin monitoring",
+            "renal": "kidney impairment",
+            "dm":   "diabetes mellitus",
+            "htn":  "hypertension",
+            "afib": "atrial fibrillation",
+        }
+        _msg_gr = user_message
+        for _abbr, _full in _SPELL_GR.items():
+            _msg_gr = _re_gr.sub(r"\b" + _abbr + r"\b", _full, _msg_gr, flags=_re_gr.IGNORECASE)
+
+        # RAG context (best-effort; falls back gracefully)
+        _rag_block_gr = ""
+        try:
+            _rag_block_gr, _ = _get_rag_context(_msg_gr, n=5)
+        except Exception:
+            pass
+
+        # Build system prompt: full clinical framework + RAG
+        _sys_gr = _SYSTEM_CLINICAL + _rag_block_gr
+        return _chat_groq(_sys_gr, _msg_gr, groq_api_key)
+    else:
+        return query_ollama_llm(user_message, chat_history or [])

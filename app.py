@@ -230,7 +230,7 @@ from ocr import (
     process_prescription_ocr,
     analyze_prescription_safety,
 )
-from chatbot import query_ollama_llm
+from chatbot import query_ollama_llm, generate_response
 from drug_lookup import check_drug_interactions, lookup_drug_info
 
 
@@ -266,6 +266,12 @@ if "ocr_result" not in st.session_state:
 
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
+
+if "llm_mode" not in st.session_state:
+    st.session_state.llm_mode = "local"
+
+if "llm_mode_radio" not in st.session_state:
+    st.session_state.llm_mode_radio = "💻  Local (Ollama)"
 
 if "groq_api_key" not in st.session_state:
     st.session_state.groq_api_key = _os.environ.get("GROQ_API_KEY", "")
@@ -372,6 +378,42 @@ with st.sidebar:
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
+    # ── LLM Engine toggle
+    st.markdown(
+        "<div style='font-size:.7rem;font-weight:700;color:#90C4E0;"
+        "letter-spacing:.08em;margin-bottom:.35rem;'>AI ENGINE</div>",
+        unsafe_allow_html=True,
+    )
+    st.radio(
+        "AI Engine",
+        options=["☁️  Cloud (Groq)", "💻  Local (Ollama)"],
+        key="llm_mode_radio",
+        label_visibility="collapsed",
+    )
+    st.session_state.llm_mode = (
+        "cloud" if "Cloud" in st.session_state.llm_mode_radio else "local"
+    )
+    _active_model_name = (
+        "llama-3.3-70b-versatile (Groq)" if st.session_state.llm_mode == "cloud"
+        else "BioMistral-7B (Ollama)"
+    )
+    st.markdown(
+        f"<div style='font-size:.72rem;color:#90C4E0;margin:.1rem 0 .7rem;'>"
+        f"Active: {_active_model_name}</div>",
+        unsafe_allow_html=True,
+    )
+    if st.session_state.llm_mode == "cloud" and not st.session_state.get("groq_api_key", ""):
+        st.markdown(
+            "<div style='font-size:.7rem;color:#EF9A9A;background:rgba(239,83,80,.15);"
+            "border-radius:6px;padding:4px 8px;margin-bottom:.4rem;'>"
+            "⚠️ GROQ_API_KEY not set</div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        "<hr style='border-color:rgba(255,255,255,0.15);margin:.3rem 0 .8rem;'>",
+        unsafe_allow_html=True,
+    )
+
     st.caption(f"v1.0.0  ·  {datetime.now().strftime('%d %b %Y')}")
 
 
@@ -1087,6 +1129,18 @@ elif active_page == "Drug Interaction Chat":
     st.markdown(
         "<div class='section-header'>💬 Drug Interaction Chat</div>", unsafe_allow_html=True
     )
+    _ci_mode = st.session_state.get('llm_mode', 'local')
+    _ci_model_label = (
+        "llama-3.3-70b-versatile (Groq ☁️)" if _ci_mode == "cloud"
+        else "BioMistral-7B (Ollama 💻)"
+    )
+    st.markdown(
+        f"<div style='display:inline-block;background:#E3F0FF;color:#1A6B8A;"
+        f"padding:3px 12px;border-radius:20px;font-size:.75rem;font-weight:700;"
+        f"border:1px solid #1A6B8A;margin-bottom:.5rem;'>"
+        f"🤖 Active Model: {_ci_model_label}</div>",
+        unsafe_allow_html=True,
+    )
     st.markdown(
         "<div class='section-sub'>Ask the AI pharmacist about drug safety, interactions, "
         "dosing, and contraindications</div>",
@@ -1188,7 +1242,12 @@ elif active_page == "Drug Interaction Chat":
                 )
             _q = st.session_state.pending_input
             st.session_state.pending_input = None
-            llm_resp = query_ollama_llm(_q, st.session_state.chat_history)
+            llm_resp = generate_response(
+                _q,
+                st.session_state.chat_history,
+                mode=st.session_state.get("llm_mode", "local"),
+                groq_api_key=st.session_state.get("groq_api_key", ""),
+            )
             if llm_resp:
                 st.session_state.chat_history.append(
                     {"role": "assistant", "content": llm_resp}

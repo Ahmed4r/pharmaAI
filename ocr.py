@@ -272,6 +272,27 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
                 _m2["normalization_notes"] = _nr.notes
         except Exception:
             pass
+
+        # --- Redundancy filter: merge medications sharing the same generic_name ---
+        _seen_generics: dict = {}  # lowercase generic -> index in medications
+        _deduped_meds: list = []
+        for _med_dup in medications:
+            _gname = (_med_dup.get("generic_name") or _med_dup.get("name") or "").lower().strip()
+            if _gname and _gname in _seen_generics:
+                # Append brand name to the canonical entry instead of adding a new row
+                _canon_idx = _seen_generics[_gname]
+                _existing = _deduped_meds[_canon_idx]
+                _prev_brands = _existing.get("merged_brands") or [_existing.get("name", "")]
+                _this_brand = _med_dup.get("name", "")
+                if _this_brand and _this_brand not in _prev_brands:
+                    _prev_brands.append(_this_brand)
+                _existing["merged_brands"] = _prev_brands
+            else:
+                if _gname:
+                    _seen_generics[_gname] = len(_deduped_meds)
+                _deduped_meds.append(_med_dup)
+        medications = _deduped_meds
+        
         if interactions:
             _interact_conf = round(
                 sum(_ix.get("interaction_confidence", 0.88) for _ix in interactions)
@@ -331,7 +352,7 @@ def analyze_prescription_safety(parsed_meds: list, patient: str = "",
                                  prescriber: str = "",
                                  patient_weight_kg: float = 0.0) -> dict:
     """Run Groq safety analysis: dosing errors, interactions, frequency alerts.
-    UI labels this as Tesseract.js; backend uses meta-llama/llama-4-scout-17b-16e-instruct.
+    Backend uses meta-llama/llama-4-scout-17b-16e-instruct via Groq.
     """
     import json as _json
     import os as _os
@@ -421,35 +442,100 @@ def analyze_prescription_safety(parsed_meds: list, patient: str = "",
         result.setdefault("frequency_alerts", [])
         result.setdefault("summary", "")
 
-        # --- MODULE 3: Strict Administration Rules (override LLM meal_timing) ---
+        # --- MODULE 3: Strict Administration Rules (override LLM meal_timing & severity) ---
+        # Values are dicts with keys: meal_timing, standard_frequency, recommendation, severity
         _STRICT_RULES = {
-            "cholecalciferol": "MUST take with a fatty meal.",
-            "vitamin d3":      "MUST take with a fatty meal.",
-            "cyproheptadine":  "MUST take 15-30 mins BEFORE meals.",
+            "cholecalciferol": {
+                "meal_timing": "MUST take with a fatty meal.",
+                "recommendation": "MUST take with a fatty meal.",
+                "severity": "moderate",
+            },
+            "vitamin d3": {
+                "meal_timing": "MUST take with a fatty meal.",
+                "recommendation": "MUST take with a fatty meal.",
+                "severity": "moderate",
+            },
+            "cyproheptadine": {
+                "meal_timing": "MUST take 15-30 mins BEFORE meals.",
+                "recommendation": "MUST take 15-30 mins BEFORE meals.",
+                "severity": "moderate",
+            },
+            "clarithromycin": {
+                "meal_timing": "Take with or without food.",
+                "standard_frequency": "Twice daily (every 12 h) for most infections.",
+                "recommendation": "Standard frequency is twice daily (every 12 h) for most infections. Verify if once-daily dosing was intended.",
+                "severity": "minor",
+            },
+            "esomeprazole": {
+                "meal_timing": "MUST take 30-60 mins BEFORE breakfast.",
+                "recommendation": "MUST take 30-60 mins BEFORE breakfast.",
+                "severity": "moderate",
+            },
         }
         for _med_sr in parsed_meds:
             _med_name_sr = (
                 (_med_sr.get("generic_name") or _med_sr.get("name") or "")
                 .lower().strip()
             )
-            for _rule_key, _rule_val in _STRICT_RULES.items():
+            for _rule_key, _rule_dict in _STRICT_RULES.items():
                 if _rule_key in _med_name_sr:
                     _found_fa = False
                     for _fa_item in result["frequency_alerts"]:
                         if _rule_key in (_fa_item.get("drug") or "").lower():
-                            _fa_item["meal_timing"] = _rule_val
+                            _fa_item["meal_timing"] = _rule_dict.get("meal_timing", "")
+                            if "standard_frequency" in _rule_dict:
+                                _fa_item["standard_frequency"] = _rule_dict["standard_frequency"]
+                            if "severity" in _rule_dict:
+                                _fa_item["severity"] = _rule_dict["severity"]
+                            _fa_item["recommendation"] = _rule_dict.get("recommendation", "")
                             _found_fa = True
                             break
                     if not _found_fa:
                         result["frequency_alerts"].append({
                             "drug": _med_sr.get("generic_name") or _med_sr.get("name"),
                             "prescribed_frequency": _med_sr.get("frequency") or "N/A",
-                            "standard_frequency": "As prescribed",
-                            "meal_timing": _rule_val,
-                            "severity": "moderate",
-                            "recommendation": _rule_val,
+                            "standard_frequency": _rule_dict.get("standard_frequency", "As prescribed"),
+                            "meal_timing": _rule_dict.get("meal_timing", ""),
+                            "severity": _rule_dict.get("severity", "moderate"),
+                            "recommendation": _rule_dict.get("recommendation", ""),
                         })
                     break
+
+        # --- Deduplication: drop minor alerts shadowed by a moderate/major one ---
+        def _same_drug(a: str, b: str) -> bool:
+            return a == b or a in b or b in a
+
+        # Group frequency_alerts indices by the drug they belong to
+        _fa_groups: dict = {}  # canonical key -> [(index, alert)]
+        for _fi2, _fa2 in enumerate(result["frequency_alerts"]):
+            _dk = (_fa2.get("drug") or "").lower().strip()
+            _matched_canon = None
+            for _canon in _fa_groups:
+                if _same_drug(_dk, _canon):
+                    _matched_canon = _canon
+                    break
+            if _matched_canon is not None:
+                _fa_groups[_matched_canon].append((_fi2, _fa2))
+            else:
+                _fa_groups[_dk] = [(_fi2, _fa2)]
+
+        _drop_idxs: set = set()
+        for _grp_entries in _fa_groups.values():
+            if len(_grp_entries) > 1:
+                _has_major_mod = any(
+                    e[1].get("severity", "minor") in ("moderate", "major")
+                    for e in _grp_entries
+                )
+                if _has_major_mod:
+                    for _gi, _ga in _grp_entries:
+                        if _ga.get("severity", "minor") == "minor":
+                            _drop_idxs.add(_gi)
+
+        if _drop_idxs:
+            result["frequency_alerts"] = [
+                _fa for _i3, _fa in enumerate(result["frequency_alerts"])
+                if _i3 not in _drop_idxs
+            ]
 
         # --- MODULE 2: Pediatric Weight-Based Dosage Validation ---
         if patient_weight_kg and patient_weight_kg > 0:

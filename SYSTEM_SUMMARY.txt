@@ -1,4 +1,4 @@
-=========================================================
+﻿=========================================================
   pharmaAI  SYSTEM ARCHITECTURE & PROGRESS SUMMARY
   Last Updated: March 11, 2026
   Repo: Ahmed4r/pharmaAI  |  Branch: main
@@ -331,23 +331,233 @@ Verified working examples:
     pregnancy_category: "See label"
 
 
-SECTION 5  COMPLETE FILE STATUS
+SECTION 5  SESSION 4 CHANGES  Clinical Upgrade: Cache + Pediatric + Strict Rules + Low-Conf Override
+
+
+Commit: 2709363 | Files changed: 5 | +241 insertions / -12 deletions
+
+
+Module 1: OpenFDA SQLite Cache (Performance)
+
+Target files: database.py, drug_lookup.py
+
+A) database.py -- new openfda_cache table added to _DDL schema:
+
+   CREATE TABLE IF NOT EXISTS openfda_cache (
+       generic_name TEXT PRIMARY KEY,
+       profile_json TEXT NOT NULL,
+       timestamp    DATETIME DEFAULT CURRENT_TIMESTAMP
+   );
+
+   - Idempotent: CREATE TABLE IF NOT EXISTS, safe on every startup
+   - PRIMARY KEY on generic_name.lower() for O(1) lookup
+   - timestamp used to enforce 30-day TTL
+
+B) drug_lookup.py -- two new cache helper functions:
+
+   _cache_get(name: str) -> dict | None
+   - Queries openfda_cache WHERE generic_name = ? AND timestamp
+     within last 30 days
+   - On hit: deserializes JSON, sets _source = "openfda_cached"
+   - Returns None on miss or any DB error (fails silently)
+
+   _cache_put(name: str, profile: dict) -> None
+   - INSERT OR REPLACE into openfda_cache with JSON-serialized profile
+   - Fails silently on any exception
+
+C) drug_lookup.py -- _openfda_lookup() updated:
+   - Step 1: _cache_get(name_l) BEFORE any HTTP request
+   - Step 2: on successful API parse -> _cache_put(name_l, result)
+   - _source values: "openfda" (fresh) | "openfda_cached" (from DB)
+
+   Performance effect: repeat lookups (same drug searched twice)
+   return instantly from SQLite instead of calling api.fda.gov.
+   Cache valid for 30 days per drug name.
+
+
+Module 2: Pediatric Dosage Validator (Clinical Safety)
+
+Target files: dosing_validator.py, ocr.py, app.py
+
+A) dosing_validator.py -- new function check_pediatric_dose():
+
+   check_pediatric_dose(drug_generic_name: str,
+                        extracted_dosage_str: str,
+                        patient_weight_kg: float) -> str | None
+
+   Logic:
+   - Normalises drug name via existing _normalise()
+   - Extracts mg value: re.search(r"(\d+(?:\.\d+)?)\s*mg", ...)
+   - Rule: paracetamol / acetaminophen -> max 15 mg/kg per dose
+   - If dose_mg > 15 * weight_kg: returns warning string with
+     exact numbers (e.g. "...exceeds 300 mg for 20.0 kg patient")
+   - Returns None if dose is safe or mg value not parseable
+
+   Example:
+     check_pediatric_dose('paracetamol', '600 mg', 20.0)
+     -> "PEDIATRIC OVERDOSE WARNING: paracetamol 600 mg exceeds
+        maximum safe pediatric dose (300 mg for 20.0 kg patient;
+        limit 15 mg/kg per dose). Reduce dose immediately."
+
+     check_pediatric_dose('paracetamol', '200 mg', 20.0)
+     -> None  (safe: 200 < 300)
+
+B) ocr.py -- analyze_prescription_safety() signature extended:
+
+   def analyze_prescription_safety(
+       parsed_meds: list,
+       patient: str = "",
+       prescriber: str = "",
+       patient_weight_kg: float = 0.0   # NEW
+   ) -> dict:
+
+   After Groq returns and setdefaults run, iterates parsed_meds:
+     from dosing_validator import check_pediatric_dose as _cpd
+     warn = _cpd(med_name, med_dosage, patient_weight_kg)
+     if warn: appends to result["dosing_errors"] with severity="major"
+   
+   Resulting dosing_error dict:
+   {
+     "drug": "<generic_name>",
+     "prescribed_dose": "<dosage string>",
+     "safe_range": "max 300 mg (15 mg/kg for 20.0 kg)",
+     "severity": "major",
+     "recommendation": "<full warning string>"
+   }
+
+C) app.py -- Patient Details section extended:
+
+   st.number_input(
+       "⚖️ Patient Weight (kg)",
+       min_value=2.0,  max_value=150.0,
+       value=20.0,     step=0.5,
+       key="patient_weight_kg",
+       help="Used for pediatric weight-based dosage safety checks"
+   )
+
+   - Renders as 4th item in a new row of 4 columns below the
+     Patient / Date / Prescriber row
+   - Session state key: "patient_weight_kg" (float, default 20.0)
+   - Value passed as patient_weight_kg= in both analyze calls
+     (direct flow and low-confidence confirm flow)
+
+
+Module 3: Strict Administration Rules Engine (Override LLM)
+
+Target file: ocr.py (inside analyze_prescription_safety)
+
+After Groq result and setdefaults, before return:
+
+   _STRICT_RULES = {
+       "cholecalciferol": "MUST take with a fatty meal.",
+       "vitamin d3":      "MUST take with a fatty meal.",
+       "cyproheptadine":  "MUST take 15-30 mins BEFORE meals.",
+   }
+
+For each medication in parsed_meds:
+  1. Normalise name: (generic_name or name).lower().strip()
+  2. Check if any rule key appears IN the normalised name
+     (substring match, so "vitamin d3 drops" still matches)
+  3. If match found:
+     a. Search existing frequency_alerts for that drug
+        - If found: OVERWRITE _fa_item["meal_timing"] with rule value
+        - If not found: APPEND a new frequency_alert entry
+  4. Break after first matching rule (one rule per drug)
+
+New frequency_alert structure when injected by strict rules:
+   {
+     "drug": "<name>",
+     "prescribed_frequency": "<freq from med or N/A>",
+     "standard_frequency": "As prescribed",
+     "meal_timing": "MUST take with a fatty meal.",
+     "severity": "moderate",
+     "recommendation": "MUST take with a fatty meal."
+   }
+
+Design intent: LLM may return "take with food" for cholecalciferol
+but the pharmacologically correct instruction is specifically
+"fatty meal" (fat is required for fat-soluble vitamin absorption).
+This engine guarantees the correct instruction regardless of what
+Groq returns.
+
+
+Module 4: Low-Confidence Manual Override (Human-in-the-Loop)
+
+Target file: app.py (Prescription Scanner UI)
+
+A) New session state variables (initialized at startup):
+   st.session_state.show_low_conf_review = False
+   st.session_state.patient_weight_kg    = 20.0
+
+B) "Detect Errors & Interactions" button -- new flow:
+
+   OLD FLOW:
+     click -> spinner -> analyze_prescription_safety() -> rerun
+
+   NEW FLOW:
+     click -> check name_confidence < 0.75 per medication
+       IF any low-confidence drugs found:
+         set show_low_conf_review = True -> rerun
+         (pipeline PAUSED -- no analysis yet)
+       IF all drugs high-confidence:
+         set show_low_conf_review = False
+         -> analyze_prescription_safety(weight=patient_weight_kg)
+         -> safety_result -> rerun
+
+C) Low-confidence review UI (rendered when show_low_conf_review):
+
+   st.warning("⚠️ Low confidence in reading some drug names.
+               Please verify before running safety analysis.")
+
+   For each medication where name_confidence < 0.75:
+     _cands = med["name_candidates"] or []
+     if original name not in _cands: prepend it
+     _cands = [c for c in _cands if c] or ["Unknown"]
+     confidence_pct = int(round(name_confidence * 100))
+     
+     st.selectbox(
+         f"Medication {i+1} (confidence: {pct}%) — select correct name:",
+         options=_cands,
+         key=f"low_conf_select_{i}",
+     )
+
+   st.button("✅ Confirm & Proceed to Safety Analysis",
+             type="primary", key="low_conf_confirm_btn")
+
+D) Confirm button action:
+   - Reads all low_conf_select_{i} values from session_state
+   - Writes selected name back into raw_json medications[i]["name"]
+   - Calls analyze_prescription_safety() with corrected meds list
+     and patient_weight_kg
+   - Sets show_low_conf_review = False
+   - Stores result in safety_result -> rerun
+
+   High-confidence flow is completely unchanged; low-confidence
+   flow adds exactly one manual confirmation step.
+
+
+SECTION 6  COMPLETE FILE STATUS
 
 
 File                     Status        Changes
 
 drug_normalizer.py       NEW           Created (200+ mappings)
 interaction_checker.py   MODIFIED      OpenFDA tier, confidence
-ocr.py                   MODIFIED      Normalizer call, conf fields
-app.py                   MODIFIED      UI panels, badges, bars, source badge
+ocr.py                   MODIFIED      Normalizer, conf, weight param,
+                                        STRICT_RULES, pediatric check
+app.py                   MODIFIED      UI panels, badges, bars, source
+                                        badge, weight input, low-conf
+                                        override, session state
 chatbot.py               MODIFIED      Clinical Pharmacologist prompts
-drug_lookup.py           MODIFIED      Full rewrite -- 3-tier API lookup
+drug_lookup.py           MODIFIED      3-tier rewrite + INN/USAN +
+                                        OTC fields + cache helpers
+database.py              MODIFIED      openfda_cache table in schema
+dosing_validator.py      MODIFIED      check_pediatric_dose() added
 rag_engine.py            UNCHANGED     ChromaDB + TF-IDF RAG
 drug_db.py               UNCHANGED     SQLite + JSON fallback
-database.py              UNCHANGED     SQLite schema
 
 
-SECTION 6  SYSTEM ARCHITECTURE DIAGRAM (CURRENT)
+SECTION 7  SYSTEM ARCHITECTURE DIAGRAM (CURRENT)
 
 
 Prescription Image
@@ -374,18 +584,36 @@ process_prescription_ocr()        [ocr.py]
        |       - Returns interactions with source + confidence
        |
        v
-analyze_prescription_safety()     [ocr.py -> Groq API]
-  - Model: meta-llama/llama-4-scout-17b-16e-instruct
-  - Clinical Pharmacologist 4-step safety prompt
-  - Returns: dosing_errors, interactions, frequency_alerts,
-             meal_timing, inferred_specialty, context_flags
-       |
-       v
 app.py -- Prescription Scanner UI
   - Confidence Dashboard (3 bars: OCR%, Drug Match%, Interaction%)
   - Medication Cards with Generic Name Badges
-  - Interaction Alerts with Source Badges (DB/Evidence/OpenFDA)
-  - Meal Timing in Frequency Alerts
+  - Patient Weight (kg) input (pediatric safety)
+  - Low-Confidence Drug Name Override (selectbox + confirm button)
+       |
+       v  [user confirms drug names if needed]
+       |
+analyze_prescription_safety()     [ocr.py -> Groq API]
+  - Model: meta-llama/llama-4-scout-17b-16e-instruct
+  - Clinical Pharmacologist 4-step safety prompt
+  - patient_weight_kg passed from UI
+  - Returns: dosing_errors, interactions, frequency_alerts,
+             meal_timing, inferred_specialty, context_flags
+       |
+       +---> MODULE 3: Strict Rules Override
+       |       - cholecalciferol/vitamin d3: "MUST take with fatty meal"
+       |       - cyproheptadine: "MUST take 15-30 mins BEFORE meals"
+       |       - Overwrites or injects frequency_alert.meal_timing
+       |
+       +---> MODULE 2: Pediatric Dosage Validator
+       |       - check_pediatric_dose() for each medication
+       |       - Paracetamol/Acetaminophen: flags if > 15 mg/kg
+       |       - Appends major severity error to dosing_errors
+       |
+       v
+app.py -- Safety Results
+  - Dosing Errors (with pediatric overdose if weight provided)
+  - Drug Interactions with Source Badges
+  - Frequency Alerts with Strict Meal Timing
 
 
 Drug Lookup Query
@@ -397,15 +625,18 @@ lookup_drug_info(drug_name)       [drug_lookup.py]
        |       -> if structured fields: return with _source="local"
        |       -> if blob-only: enrich from OpenFDA, _source="local"
   - Tier 2: _openfda_lookup()
-       |       -> searches openfda.generic_name + brand_name
+       |       -> _cache_get(): check SQLite openfda_cache (30-day TTL)
+       |       -> on cache miss: call api.fda.gov
+       |       -> _cache_put(): save result to SQLite on success
        |       -> _INN_TO_USAN retry for international names
        |       -> _parse_openfda_label(): handles Rx + OTC formats
        |       -> drug_class RxNorm fallback (CUI/DAILYMED)
+       |       -> _source: "openfda" (fresh) | "openfda_cached"
   - Tier 3: _rxnorm_lookup()
        |       -> CUI -> RxTerms allinfo -> drug class
        v
 app.py -- Drug Lookup UI
-  - Source badge: Local DB / OpenFDA / RxNorm
+  - Source badge: Local DB / OpenFDA / OpenFDA (cached) / RxNorm
   - Mechanism, Indications, Contraindications, Side Effects
   - Dosage, Renal Adjustment, Pregnancy Category
 
@@ -430,7 +661,7 @@ BioMistral 7B via Ollama (http://localhost:11434)
   - RAG context injected as VERIFIED CLINICAL REFERENCES
 
 
-SECTION 7  ENVIRONMENT & DEPENDENCIES
+SECTION 8  ENVIRONMENT & DEPENDENCIES
 
 
 Python: 3.10 | Windows | venv: .venv
@@ -452,7 +683,7 @@ Run app:
   streamlit run app.py
 
 
-SECTION 8  TASKS COMPLETED / PENDING
+SECTION 9  TASKS COMPLETED / PENDING
 
 
 COMPLETED:
@@ -482,14 +713,30 @@ COMPLETED:
   [x] drug_lookup.py -- FDA section header stripping in _clean()
   [x] drug_lookup.py -- enrich local-only entries from OpenFDA
   [x] app.py -- Drug Lookup source badge (Local DB/OpenFDA/RxNorm)
+  [x] database.py -- openfda_cache table (30-day TTL SQLite cache)
+  [x] drug_lookup.py -- _cache_get() / _cache_put() helpers
+  [x] drug_lookup.py -- cache check before every OpenFDA API call
+  [x] dosing_validator.py -- check_pediatric_dose() (15 mg/kg rule)
+  [x] ocr.py -- patient_weight_kg param in analyze_prescription_safety
+  [x] ocr.py -- pediatric overdose appended to dosing_errors (major)
+  [x] app.py -- Patient Weight (kg) number input in Patient Details
+  [x] ocr.py -- STRICT_RULES dict overriding LLM meal_timing
+      (cholecalciferol, vitamin d3, cyproheptadine)
+  [x] app.py -- Low-confidence manual override UI
+      (name_confidence < 0.75 triggers selectbox review)
+  [x] app.py -- show_low_conf_review + patient_weight_kg session state
+  [x] app.py -- Confirm & Proceed button wires corrected names
+      back into raw_json before running safety analysis
 
 POSSIBLE FUTURE IMPROVEMENTS:
-  [ ] Cache OpenFDA results in SQLite to reduce API calls
   [ ] Expand drug_normalizer.py catalog beyond 200 entries
   [ ] Expand _INN_TO_USAN mappings beyond 10 entries
   [ ] Add DrugBank API (requires API key) as Tier 4 interactions
   [ ] RAG: add more clinical guidelines to knowledge_base/drugs.json
-  [ ] Add patient weight/age for pediatric dose calculations
   [ ] Multi-language output (Arabic UI option)
+  [ ] Extend pediatric rules beyond paracetamol (ibuprofen, amoxicillin)
+  [ ] Add renal/hepatic dose adjustment validator
+  [ ] Expand STRICT_RULES with more administration-critical drugs
+  [ ] Cache eviction strategy (manual purge or size limit)
 
 =========================================================
