@@ -46,6 +46,77 @@ _tfidf_corpus: Optional[list[dict]] = None   # fallback
 _brand_map_cache: Optional[dict] = None        # brand->generic, loaded lazily
 
 # ---------------------------------------------------------------------------
+# Brand-to-Generic mapping (Task 1)
+# Covers common Egyptian/MENA local brands + universal trade names
+# ---------------------------------------------------------------------------
+BRAND_MAP: dict[str, str] = {
+    # PPI / Gastro
+    "mesopral": "esomeprazole",  "nexium": "esomeprazole",
+    "omez": "omeprazole",        "losec": "omeprazole",      "prilosec": "omeprazole",
+    "controloc": "pantoprazole", "pantoloc": "pantoprazole", "protonix": "pantoprazole",
+    "pariet": "rabeprazole",     "aciphex": "rabeprazole",
+    "prevacid": "lansoprazole",
+    # Antibiotics
+    "novaclar": "clarithromycin","klacid": "clarithromycin", "biaxin": "clarithromycin",
+    "flagyl": "metronidazole",   "rozex": "metronidazole",
+    "augmentin": "amoxicillin",  "amoxil": "amoxicillin",
+    "cipro": "ciprofloxacin",    "ciproxin": "ciprofloxacin",
+    # Cardiovascular
+    "concor": "bisoprolol",      "emconcor": "bisoprolol",
+    "coumadin": "warfarin",      "jantoven": "warfarin",
+    "plavix": "clopidogrel",
+    "norvasc": "amlodipine",     "amlopres": "amlodipine",
+    "zestril": "lisinopril",     "prinivil": "lisinopril",
+    "lasix": "furosemide",
+    "cordarone": "amiodarone",   "pacerone": "amiodarone",
+    "lanoxin": "digoxin",
+    "crestor": "rosuvastatin",   "lipitor": "atorvastatin",  "zocor": "simvastatin",
+    # Analgesics / NSAIDs
+    "aspocid": "aspirin",        "ecotrin": "aspirin",       "disprin": "aspirin",
+    "advil": "ibuprofen",        "motrin": "ibuprofen",      "brufen": "ibuprofen",
+    "aleve": "naproxen",         "naprosyn": "naproxen",
+    "dolowin": "aceclofenac",
+    "tylenol": "paracetamol",    "panadol": "paracetamol",   "calpol": "paracetamol",
+    # Diabetes
+    "glucophage": "metformin",   "fortamet": "metformin",
+    "diamicron": "gliclazide",
+    # CNS
+    "zoloft": "sertraline",      "lustral": "sertraline",
+    # Misc
+    "ventolin": "salbutamol",    "proventil": "salbutamol",
+    "synthroid": "levothyroxine","euthyrox": "levothyroxine",
+}
+
+
+def normalize_query(query: str) -> str:
+    """
+    Replace brand names in *query* with their generic equivalents.
+    Case-insensitive whole-word match so "Mesopral 40mg" -> "esomeprazole 40mg".
+    Also tries drug_normalizer.normalize() for extended coverage.
+    """
+    result = query
+    for brand, generic in BRAND_MAP.items():
+        result = re.sub(
+            r"\b" + re.escape(brand) + r"\b",
+            generic, result, flags=re.IGNORECASE,
+        )
+    # Extended coverage via drug_normalizer (best-effort)
+    try:
+        from drug_normalizer import normalize as _dn_norm
+        for word in query.split():
+            nr = _dn_norm(word)
+            if nr and nr.confidence >= 0.8 and nr.generic_name.lower() != word.lower():
+                result = re.sub(
+                    r"\b" + re.escape(word) + r"\b",
+                    nr.generic_name, result, flags=re.IGNORECASE,
+                )
+    except Exception:
+        pass
+    return result
+
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -515,3 +586,95 @@ def format_citations(chunks: list[dict]) -> str:
         '\U0001f4da SOURCES FROM KNOWLEDGE BASE</p>'
         f'{inner}</div>'
     )
+
+
+# ===========================================================================
+# PDF-BASED RAG  (ChromaDB + HuggingFace all-MiniLM-L6-v2)
+# Populated by  ingest.py  --  separate from the drugs.json knowledge base.
+# ===========================================================================
+
+_PDF_CHROMA_DIR    = _BASE / "chroma_db"
+_pdf_chroma_client = None
+_pdf_collection_ref = None
+_hf_embedder        = None
+
+
+def _get_hf_embedder():
+    global _hf_embedder
+    if _hf_embedder is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        _hf_embedder = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    return _hf_embedder
+
+
+def _get_pdf_collection():
+    global _pdf_chroma_client, _pdf_collection_ref
+    if _pdf_collection_ref is not None:
+        return _pdf_collection_ref
+    if not _PDF_CHROMA_DIR.exists():
+        return None
+    try:
+        import chromadb as _cdb
+        _pdf_chroma_client = _cdb.PersistentClient(path=str(_PDF_CHROMA_DIR))
+        _pdf_collection_ref = _pdf_chroma_client.get_collection("pdf_kb")
+        return _pdf_collection_ref
+    except Exception:
+        return None
+
+
+def is_pdf_ready() -> bool:
+    try:
+        col = _get_pdf_collection()
+        return col is not None and col.count() > 0
+    except Exception:
+        return False
+
+
+_PDF_SCORE_THRESHOLD = 0.30
+
+PDF_LOW_CONF_BANNER = (
+    "\u26a0\ufe0f **Verified info not in local DB, providing general knowledge...**\n\n"
+)
+
+
+def retrieve_from_pdf(user_query: str, n_results: int = 5) -> list:
+    # Normalize brand names to generics before embedding
+    user_query = normalize_query(user_query)
+    col = _get_pdf_collection()
+    if col is None:
+        return []
+    count = col.count()
+    if count == 0:
+        return []
+    try:
+        embedder = _get_hf_embedder()
+        query_vec = embedder.embed_query(user_query)
+        results = col.query(
+            query_embeddings=[query_vec],
+            n_results=min(n_results, count),
+            include=["documents", "metadatas", "distances"],
+        )
+        chunks = []
+        ids_list  = results.get("ids",        [[]])[0]
+        docs_list = results.get("documents",  [[]])[0]
+        metas     = results.get("metadatas",  [[]])[0]
+        dists     = results.get("distances",  [[]])[0]
+        for doc_id, text, meta, dist in zip(ids_list, docs_list, metas, dists):
+            score = round(1.0 - (dist or 0.0), 4)
+            chunks.append({
+                "text":           text,
+                "source":         meta.get("source", "Unknown PDF"),
+                "page_number":    int(meta.get("page_number", 1)),
+                "chunk_index":    int(meta.get("chunk_index", 0)),
+                "id":             doc_id,
+                "score":          score,
+                "low_confidence": score < _PDF_SCORE_THRESHOLD,
+            })
+        return chunks
+    except Exception as _e:
+        print(f"[rag_engine] PDF retrieval error: {_e}")
+        return []

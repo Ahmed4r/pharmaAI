@@ -1,4 +1,4 @@
-﻿# Secrets  NEVER commit
+# Secrets  NEVER commit
 .env
 .env.*
 !.env.example
@@ -17,11 +17,22 @@ venv/
 # VS Code
 .vscode/
 
-# ChromaDB / knowledge base binaries
+# ChromaDB vector stores
 knowledge_base/chroma_db/
+chroma_db/
+
+# SQLite databases
+*.db
 *.sqlite3
+
+# Large binary assets (PDFs)
+knowledge_base/*.pdf
 
 # Misc
 *.log
 .DS_Store
 Thumbs.db
+
+# Temp / scratch scripts
+_*.py
+_*.txt

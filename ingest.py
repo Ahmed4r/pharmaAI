@@ -1,168 +1,161 @@
+﻿"""
+ingest.py  --  PDF ingestion pipeline for PharmaAI RAG system.
+
+Loads a medical PDF, splits it into clinical context-preserving chunks,
+embeds them with sentence-transformers (all-MiniLM-L6-v2), and persists
+the vectors to a local ChromaDB store at ./chroma_db.
+
+Usage:
+    python ingest.py <path/to/medical.pdf>
+    python ingest.py  medical_reference.pdf  --chroma-dir ./chroma_db
 """
-ingest.py -- Rebuild the ChromaDB knowledge base for PharmaAI.
+from __future__ import annotations
 
-Sources:  knowledge_base/*.pdf (BNF80.pdf + any future PDFs)
-          knowledge_base/drugs.json
-
-Usage:    python ingest.py
-
-Steps: 1) Delete chroma_db to remove stale/duplicate data
-       2) Load PDFs via PyPDFDirectoryLoader
-       3) Load drugs.json as text documents
-       4) Split with chunk_size=1000 / chunk_overlap=200
-       5) Embed via nomic-embed-text (Ollama) and upsert into ChromaDB
-          collection "pharma_kb" (same path/name as rag_engine.py)
-"""
-
-import json
-import shutil
+import sys
+import os
 from pathlib import Path
 
-import chromadb
-from langchain_community.document_loaders import PyPDFDirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-import ollama
 
-_BASE       = Path(__file__).parent
-_KB_DIR     = _BASE / "knowledge_base"
-_CHROMA_DIR = _KB_DIR / "chroma_db"
-_OLLAMA_URL = "http://localhost:11434"
-
-_SPLITTER = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    separators=["\n\n", "\n", ". ", " ", ""],
-)
-
-
-def _embed(text: str):
-    """Embed text with nomic-embed-text via Ollama; return None on failure."""
+def ingest(pdf_path: str, chroma_dir: str | None = None) -> int:
+    """
+    Load, split, embed, and persist a PDF into ChromaDB.
+    Returns the total number of chunks indexed.
+    """
     try:
-        client = ollama.Client(host=_OLLAMA_URL)
-        resp = client.embeddings(model="nomic-embed-text", prompt=text)
-        return resp.get("embedding") or resp.get("embeddings")
-    except Exception as exc:
-        print(f"  WARNING: Embedding error: {exc}")
-        return None
+        from langchain_community.document_loaders import PyPDFLoader
+    except ImportError:
+        raise ImportError(
+            "langchain-community is required: pip install langchain-community pypdf"
+        )
 
-
-def _safe_meta(meta: dict) -> dict:
-    """ChromaDB only accepts str/int/float/bool metadata values."""
-    safe = {}
-    for k, v in (meta or {}).items():
-        if isinstance(v, (str, int, float, bool)):
-            safe[str(k)] = v
-        else:
-            safe[str(k)] = str(v)
-    return safe
-
-
-def _load_pdfs() -> list:
-    """Load every PDF in knowledge_base/ using PyPDFDirectoryLoader."""
-    loader = PyPDFDirectoryLoader(str(_KB_DIR))
-    docs = loader.load()
-    print(f"  PDFs  : {len(docs)} pages loaded")
-    return docs
-
-
-def _load_drugs_json() -> list:
-    """Convert drugs.json entries into Document objects."""
-    path = _KB_DIR / "drugs.json"
-    if not path.exists():
-        print("  drugs.json not found -- skipping")
-        return []
-    with path.open(encoding="utf-8") as fh:
-        data = json.load(fh)
-    docs = []
-    if isinstance(data, list):
-        for i, entry in enumerate(data):
-            text = json.dumps(entry, ensure_ascii=False)
-            docs.append(Document(
-                page_content=text,
-                metadata={"source": "drugs.json", "index": i},
-            ))
-    elif isinstance(data, dict):
-        for drug, details in data.items():
-            text = f"{drug}: {json.dumps(details, ensure_ascii=False)}"
-            docs.append(Document(
-                page_content=text,
-                metadata={"source": "drugs.json", "drug": drug},
-            ))
-    print(f"  JSON  : {len(docs)} drug entries from drugs.json")
-    return docs
-
-
-def main():
-    # 1. Clear old ChromaDB
-    if _CHROMA_DIR.exists():
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
         try:
-            shutil.rmtree(_CHROMA_DIR)
-            print(f"[1/4] Cleared existing ChromaDB at {_CHROMA_DIR}")
-        except PermissionError:
-            print("[ERROR] Cannot delete chroma_db -- locked by another process.")
-            print("        Stop the Streamlit app first, then re-run: python ingest.py")
-            raise SystemExit(1)
-    else:
-        print("[1/4] No existing ChromaDB -- fresh start")
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+        except ImportError:
+            raise ImportError(
+                "LangChain text splitter missing: pip install langchain langchain-text-splitters"
+            )
 
-    # 2. Load documents
-    print("[2/4] Loading documents ...")
-    all_docs = _load_pdfs() + _load_drugs_json()
-    print(f"       {len(all_docs)} total raw documents")
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+    except ImportError:
+        raise ImportError(
+            "langchain-huggingface is required: pip install langchain-huggingface sentence-transformers"
+        )
 
-    # 3. Split into chunks
-    print("[3/4] Splitting into chunks (size=1000, overlap=200) ...")
-    chunks = _SPLITTER.split_documents(all_docs)
-    print(f"       {len(chunks)} chunks created")
+    import chromadb
 
-    # 4. Embed and index
-    print("[4/4] Embedding and indexing into ChromaDB ...")
-    _CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    client     = chromadb.PersistentClient(path=str(_CHROMA_DIR))
-    collection = client.get_or_create_collection(
-        name="pharma_kb",
+    _base = Path(__file__).parent
+    _chroma_path = chroma_dir or str(_base / "chroma_db")
+    Path(_chroma_path).mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------ #
+    # 1. Load PDF pages
+    # ------------------------------------------------------------------ #
+    print(f"[ingest] Loading PDF: {pdf_path}")
+    loader = PyPDFLoader(pdf_path)
+    pages = loader.load()
+    print(f"[ingest] {len(pages)} pages loaded")
+
+    # ------------------------------------------------------------------ #
+    # 2. Split into clinical context-preserving chunks
+    # ------------------------------------------------------------------ #
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    chunks = splitter.split_documents(pages)
+    print(f"[ingest] {len(chunks)} chunks created (size=800, overlap=150)")
+
+    # ------------------------------------------------------------------ #
+    # 3. Embed with all-MiniLM-L6-v2
+    # ------------------------------------------------------------------ #
+    print("[ingest] Loading embedding model: all-MiniLM-L6-v2 ...")
+    embedder = HuggingFaceEmbeddings(
+        model_name="all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
+
+    # ------------------------------------------------------------------ #
+    # 4. Connect to ChromaDB and (re)create the pdf_kb collection
+    # ------------------------------------------------------------------ #
+    print(f"[ingest] Connecting to ChromaDB at: {_chroma_path}")
+    client = chromadb.PersistentClient(path=_chroma_path)
+
+    try:
+        client.delete_collection("pdf_kb")
+        print("[ingest] Cleared existing pdf_kb collection")
+    except Exception:
+        pass
+
+    collection = client.create_collection(
+        name="pdf_kb",
         metadata={"hnsw:space": "cosine"},
     )
 
-    BATCH   = 25
-    total   = len(chunks)
-    done    = 0
-    skipped = 0
+    # ------------------------------------------------------------------ #
+    # 5. Build IDs / texts / metadata / embeddings
+    # ------------------------------------------------------------------ #
+    pdf_name = Path(pdf_path).name
+    ids, texts, metadatas, embed_vecs = [], [], [], []
 
-    for i in range(0, total, BATCH):
-        batch = chunks[i : i + BATCH]
-        ids, vecs, texts, metas = [], [], [], []
+    for i, chunk in enumerate(chunks):
+        text = chunk.page_content.strip()
+        if not text:
+            continue
+        # PyPDFLoader stores 0-based page index in metadata["page"]
+        page_num = int(chunk.metadata.get("page", 0)) + 1
+        vector = embedder.embed_query(text)
+        ids.append(f"pdf_chunk_{i}")
+        texts.append(text)
+        metadatas.append(
+            {
+                "source": pdf_name,
+                "page_number": page_num,
+                "chunk_index": i,
+            }
+        )
+        embed_vecs.append(vector)
 
-        for j, chunk in enumerate(batch):
-            text = chunk.page_content.strip()
-            if not text:
-                skipped += 1
-                continue
-            vec = _embed(text)
-            if vec is None:
-                skipped += 1
-                continue
-            ids.append(f"chunk_{i + j}")
-            vecs.append(vec)
-            texts.append(text)
-            metas.append(_safe_meta(chunk.metadata))
+    # ------------------------------------------------------------------ #
+    # 6. Batch-upsert into ChromaDB
+    # ------------------------------------------------------------------ #
+    batch_size = 100
+    total = len(ids)
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        collection.add(
+            ids=ids[start:end],
+            documents=texts[start:end],
+            metadatas=metadatas[start:end],
+            embeddings=embed_vecs[start:end],
+        )
+        print(f"[ingest] Stored chunks {start + 1}–{end} / {total}")
 
-        if ids:
-            collection.upsert(
-                ids=ids,
-                embeddings=vecs,
-                documents=texts,
-                metadatas=metas,
-            )
-            done += len(ids)
-
-        print(f"  {done}/{total} chunks indexed ...", end="\r")
-
-    print(f"\n[OK] Ingestion complete -- {collection.count()} chunks in pharma_kb")
-    if skipped:
-        print(f"     ({skipped} chunks skipped: empty text or embedding failure)")
+    print(f"\n[ingest] Done. {total} chunks indexed in ChromaDB.")
+    return total
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: python ingest.py <path/to/medical.pdf>")
+        print("       python ingest.py medical_reference.pdf --chroma-dir ./chroma_db")
+        sys.exit(1)
+
+    _pdf = sys.argv[1]
+    _dir = None
+    if "--chroma-dir" in sys.argv:
+        _idx = sys.argv.index("--chroma-dir")
+        if _idx + 1 < len(sys.argv):
+            _dir = sys.argv[_idx + 1]
+
+    if not os.path.isfile(_pdf):
+        print(f"Error: file not found: {_pdf}")
+        sys.exit(1)
+
+    count = ingest(_pdf, chroma_dir=_dir)
+    print(f"\n  Successfully indexed {count} chunks from '{_pdf}'.")

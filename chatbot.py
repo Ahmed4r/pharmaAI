@@ -29,39 +29,31 @@ _CLINICAL_RE = re.compile(
 )
 
 _SYSTEM_CLINICAL = (
-    "You are a Clinical Pharmacologist (خبير صيدلاني إكلينيكي) AI assistant.\n"
-    "Your role: analyse prescriptions and clinical pharmacology questions using "
-    "the four-step evidence-based framework below.\n\n"
-    "STEP 1 — CONTEXT EXTRACTION (always first)\n"
-    "Before naming interactions or checking doses, identify the therapeutic context: "
-    "specialty (cardiology / GI / pediatrics / diabetes / etc.), patient population "
-    "(age, renal/hepatic status), and any diagnosis clues in the question. "
-    "Use this context to prefer the correct drug when letter-similar names exist "
-    "(e.g. Colovatil vs Clopidogrel — GI context → Colovatil).\n\n"
-    "STEP 2 — SLASH-NOTATION & SYMBOL LOGIC\n"
-    "When interpreting prescription notation:\n"
-    "  • 'X/N' next to a drug name = 'X dose every N hours' (scheduling separator).\n"
-    "    e.g. 1/8 = 1 tablet every 8 h = 3 times daily.\n"
-    "  • '½ tab' or '0.5 tab' = half a tablet (true fraction — different context).\n"
-    "  • Compare interpreted frequency against the drug's standard dosing schedule; "
-    "flag clinically meaningful deviations.\n\n"
-    "STEP 3 — EVIDENCE-BASED INTERACTIONS (no trivial findings)\n"
-    "Report ONLY moderate-to-major interactions affecting safety or efficacy.\n"
-    "For every interaction, explain the mechanism (pharmacodynamics or pharmacokinetics — "
-    "e.g. 'CYP2C9 inhibition raises warfarin AUC by ~50%') and give a specific action.\n"
-    "Do NOT list interactions that are theoretical or rarely clinically relevant.\n\n"
-    "STEP 4 — PHARMACOKINETICS & MEAL TIMING\n"
-    "Always include food/timing guidance based on pharmacokinetics:\n"
-    "  • Empty stomach (↑ absorption): omeprazole, levothyroxine, bisphosphonates.\n"
-    "  • With food (↓ GI irritation / ↑ bioavailability): metformin, ibuprofen, "
-    "iron (when using ferrous sulphate), some antibiotics.\n"
-    "  • Avoid grapefruit: CYP3A4 substrates (atorvastatin, amlodipine, cyclosporine).\n\n"
-    "OUTPUT FORMAT\n"
-    "Use structured sections with bold headers. Flag critical safety issues with [WARNING].\n"
-    "Use specific numbers (mg/kg, CrCl thresholds, target INR ranges).\n"
-    "Do NOT invent doses — if data is absent from context, state it explicitly.\n"
-    "Always close with: [Verify with licensed pharmacist or prescriber before clinical decisions]\n"
+    "You are a Clinical Pharmacologist AI assistant powered by a RAG pipeline "
+    "backed by the British National Formulary (BNF).\n\n"
+    "Always respond using ALL FOUR sections below in this exact order:\n\n"
+    "## 💊 Drug Identification\n"
+    "State the generic name(s), therapeutic class, and primary mechanism of action.\n\n"
+    "## ⚠️ Interaction Alerts\n"
+    "List every MAJOR, MODERATE, or MINOR interaction found in the retrieved context. "
+    "For each: state severity, mechanism (PD or PK / CYP pathway), and clinical risk. "
+    "If no interactions are documented: 'No significant interactions found in retrieved BNF context.'\n\n"
+    "## 💡 Clinical Rationale (The Why)\n"
+    "Search the context for: absorption, bioavailability, acid-labile, "
+    "half-life, protein binding, CYP450, enzyme inhibition, food effect. "
+    "Explain WHY the drug behaves as it does (e.g. WHY taken before food, "
+    "WHY dose differs in renal failure). "
+    "If not explained in context, use established pharmacological knowledge "
+    "but label it '[Mechanism of Action]:\'\n\n"
+    "## 📚 BNF References\n"
+    "List the BNF page numbers from the retrieved context (e.g. BNF80, Page 423). "
+    "If no BNF context retrieved: 'No BNF context retrieved for this query.'\n\n"
+    "STRICT RULES:\n"
+    "1. Base all clinical facts on the verified references provided.\n"
+    "2. NEVER invent INR thresholds, dose values, or monitoring frequencies not in sources.\n"
+    "3. Always end with: [Verify with a licensed pharmacist or prescriber before clinical decisions]\n"
 )
+
 
 
 def _expand_query(query: str) -> str:
@@ -156,7 +148,7 @@ def chat(
                 "num_predict": 1500,
                 "temperature": 0.3,
                 "top_p":       0.9,
-                "num_ctx":     2048,
+                "num_ctx":     4096,
                 "num_gpu":     20,
             },
         )
@@ -291,6 +283,12 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     for _abbr, _full in _SPELL.items():
         _msg = _re.sub(r"\b" + _abbr + r"\b", _full, _msg, flags=_re.IGNORECASE)
 
+    # Extract PDF context injected by generate_response() and move it into _SYS later
+    _pdf_ctx_injected = ""
+    _PDF_CTX_SEP = "\n\nQuestion: "
+    if "REFERENCED CLINICAL CONTEXT (from PDF):" in _msg and _PDF_CTX_SEP in _msg:
+        _pdf_ctx_injected, _msg = _msg.split(_PDF_CTX_SEP, 1)
+
     # 2. Detect clinical + intent flags
     _CLINICAL_RE = _re.compile(
         r"\b(mg|mcg|tablet|capsule|dose|drug|medication|medicine|prescription|"
@@ -321,6 +319,8 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
     _context_drug_match = True   # strict RAG guardrail: context must mention queried drugs
     _confidence_pct = 0          # 0-100 RAG relevance score
     _low_confidence = False      # True when confidence < 80%
+    _severity = ""              # set in elif _is_clinical branch; pre-init to avoid UnboundLocalError
+    _is_major = False
 
     if _is_clinical and _RAG_ENGINE_AVAILABLE:
         try:
@@ -429,7 +429,9 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
             print(f"RAG error: {_re_err}")
 
     # 3j. Context mismatch: refuse answer if no chunk mentions queried drugs
-    if not _context_drug_match and _query_drugs:
+    # Skip guard when PDF context was already injected into the message
+    _has_pdf_ctx = "REFERENCED CLINICAL CONTEXT (from PDF):" in user_message
+    if not _context_drug_match and _query_drugs and not _has_pdf_ctx:
         _queried_str = ", ".join(d.title() for d in _query_drugs)
         return (
             f"\u26a0\ufe0f **Context Mismatch \u2014 Cannot Answer Reliably**\n\n"
@@ -494,7 +496,9 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
             "   dose is completely absent from the references.\n"
             "6. If the exact dose is missing say: '**Exact dosing data not available "
             "   in knowledge base.** Consult current BNF/ASHP guidelines.'\n"
-            "7. End with: [Verify with a licensed pharmacist before clinical use]\n"
+            "7. Critical Rule: When a contraindication or interaction is found, you MUST use your core medical knowledge to explain the"
+            " Physiological Mechanism (e.g., mention receptor types like Beta-1 or Beta-2) even if the BNF text only mentions the warning without the explanation.\n"
+            "8. End with: [Verify with a licensed pharmacist before clinical use]\n"
         ) + _rag_block + _extracted_block
 
     elif _is_clinical:
@@ -502,6 +506,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         # Pre-check structured interaction DB for severity + known facts
         _ix_data: dict | None = None
         _is_major = False
+        _severity = ""  # "MAJOR" | "MODERATE" | "MINOR" | ""
         _timing_rule_drugs = {"ibuprofen", "naproxen"}  # drugs where 30-min rule applies
         _warfarin_in_query = "warfarin" in _query_drugs or "coumadin" in _msg.lower()
         _exclude_timing_note = ""
@@ -510,9 +515,20 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
                 _ixs = check_interactions(_query_drugs)
                 if _ixs:
                     _ix_data = _ixs[0]
-                    _is_major = _ix_data.get("severity", "") == "major"
+                    _severity = _ix_data.get("severity", "").upper()
+                    _is_major = _severity == "MAJOR"
             except Exception:
                 pass
+        # Infer severity from PDF context when DB has no entry for this pair
+        if not _severity and _pdf_ctx_injected:
+            _ctx_lc = _pdf_ctx_injected.lower()
+            if any(w in _ctx_lc for w in ("contraindicated", "avoid", "major", "severe", "life-threatening", "fatal", "do not use")):
+                _severity = "MAJOR"; _is_major = True
+            elif any(w in _ctx_lc for w in ("caution", "monitor", "moderate", "significant", "increase")):
+                _severity = "MODERATE"
+            elif any(w in _ctx_lc for w in ("minor", "minimal", "slight", "unlikely")):
+                _severity = "MINOR"
+
         # If warfarin is involved, explicitly ban the 30-min COX-1 timing rule
         if _warfarin_in_query and not (_timing_rule_drugs & set(_query_drugs)):
             _exclude_timing_note = (
@@ -531,39 +547,38 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
             _action = _ix_data.get("action", "")
             _db_warning = (
                 f"\nVERIFIED INTERACTION DATABASE ENTRY:\n"
-                f"  Pair: {_d1} + {_d2}  |  Severity: MAJOR\n"
+                f"  Pair: {_d1} + {_d2}  |  Severity: {_severity if _severity else 'MAJOR'}\n"
                 f"  Mechanism: {_mech}\n"
                 f"  Clinical summary: {_desc}\n"
                 f"  Recommended action: {_action}\n"
             )
         _SYS = (
-            "You are a Senior Clinical Pharmacist writing a structured drug interaction report.\n\n"
+            "You are a Clinical Pharmacologist AI. Respond using ALL FOUR sections exactly.\n\n"
             + _drug_scope
             + _exclude_timing_note
-            + "OUTPUT FORMAT  follow this structure exactly:\n\n"
-            "** MAJOR INTERACTION DETECTED** (or MODERATE/MINOR as appropriate)\n"
-            "**Drugs:** [Drug A] + [Drug B]\n\n"
-            "**Mechanism:**\n"
-            "Explain each drug's pathway separately  do NOT merge them.\n"
-            "Antiplatelet effects (COX-1 inhibition) are DIFFERENT from anticoagulation "
-            "(Vitamin K antagonism). State which pathway each drug uses.\n\n"
-            "**Clinical Consequence:**\n"
-            "Describe the combined effect and the specific risk (e.g., additive bleeding risk).\n\n"
-            "**Monitoring:**\n"
-            "- State specific lab tests (e.g., INR, CBC, renal function)\n"
-            "- State monitoring frequency (e.g., 'check INR weekly')\n"
-            "- State clinical signs to watch (e.g., bruising, dark/tarry stools, prolonged bleeding)\n\n"
-            "**Clinical Recommendation:**\n"
-            "State the action clearly (avoid / use with caution / dose adjustment / alternative).\n\n"
+            + "## 💊 Drug Identification\n"
+            "Generic name, therapeutic class, mechanism of action.\n\n"
+            "## ⚠️ Interaction Alerts\n"
+            "List MAJOR/MODERATE/MINOR interactions from context. "
+            "State mechanism (PD/PK / CYP pathway) and clinical risk per interaction.\n\n"
+            "## 💡 Clinical Rationale (The Why)\n"
+            "Search context for: absorption, bioavailability, acid-labile, CYP450. "
+            "Explain the pharmacological reason. "
+            "If not in context label it: '[Mechanism of Action]:\'\n\n"
+            "## 📚 BNF References\n"
+            "List BNF page numbers from context. If none: 'No BNF context retrieved.'\n\n"
             "STRICT RULES:\n"
-            "1. Base your answer on the verified references AND the database entry provided.\n"
-            "2. Ignore any reference about a DIFFERENT drug pair  do NOT transfer its rules.\n"
-            "3. NEVER invent INR thresholds, timing rules, or dose values not in the sources.\n"
-            "4. End with: [Verify with a licensed pharmacist before any clinical decision]\n"
+            "1. Base clinical facts on the verified references AND the database entry.\n"
+            "2. NEVER invent thresholds or dose values not in sources.\n"
+            "3. End with: [Verify with a licensed pharmacist before any clinical decision]\n"
         ) + _db_warning + _rag_block
 
     else:
         _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely and concisely."
+
+    # Inject extracted PDF context into the system prompt (correct placement)
+    if _pdf_ctx_injected:
+        _SYS = _SYS + "\n\n" + _pdf_ctx_injected
 
     # 5. Build prompt - intent-aware instruction
     if _is_clinical and _is_dosing_query:
@@ -577,15 +592,15 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         )
     elif _is_clinical:
         _major_task = (
-            "TASK: Write the full structured interaction report in the exact format "
-            "specified in the system prompt. Start immediately with "
-            "'**⚠️ MAJOR INTERACTION DETECTED**'. "
+            "TASK: Write ONLY the body of the structured interaction report "
+            "in the exact format specified. Do NOT write a title or header line. "
+            "Start directly with '**Drugs:**'. "
             "Bold all drug names and severity labels. "
-            "Under Monitoring, explicitly list: INR frequency, bleeding signs "
-            "(bruising, dark stools, prolonged bleeding time). "
+            "Under Monitoring, list: INR frequency and bleeding signs. "
             "Do NOT mention COX-1 timing rules unless both drugs are NSAIDs.\n"
-            if _is_major else
-            "Provide a structured pharmacist safety review in the format specified. "
+            if _severity in ("MAJOR", "MODERATE", "MINOR") else
+            "Write a structured pharmacist safety review. "
+            "Do NOT write a title or header line. Start with '**Drugs:**'. "
             "Bold all severity labels and drug names.\n"
         )
         full_prompt = (
@@ -608,7 +623,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
                 "num_predict": 1500,
                 "temperature": 0.3,
                 "top_p":       0.9,
-                "num_ctx":     2048,
+                "num_ctx":     4096,
                 "num_gpu":     0,
             },
         )
@@ -618,6 +633,17 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
         for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]", "<s>", "</s>"):
             answer = answer.replace(_marker, "")
         answer = answer.strip()
+
+        # Prepend severity header in Python - never trust small model to generate it
+        if _severity and len(answer) >= 15:
+            _sev_icon = "\u26a0\ufe0f" if _severity in ("MAJOR", "MODERATE") else "\u2139\ufe0f"
+            _sev_hdr = f"**{_sev_icon} {_severity} INTERACTION DETECTED**\n\n"
+            import re as _reh
+            answer = _reh.sub(
+                r"^\*\*[^\n]{0,80}INTERACTION[^\n]{0,40}\*\*\n*",
+                "", answer.lstrip(), flags=_reh.MULTILINE
+            )
+            answer = _sev_hdr + answer.lstrip()
 
         if len(answer) < 15:
             return "\u26a0\ufe0f \u0644\u0645 \u064a\u0635\u062f\u0631 \u0627\u0644\u0645\u0648\u062f\u064a\u0644 \u0631\u062f\u0651\u0627\u064b. \u062d\u0627\u0648\u0644 \u0625\u0639\u0627\u062f\u0629 \u0635\u064a\u0627\u063a\u0629 \u0627\u0644\u0633\u0624\u0627\u0644."
@@ -703,13 +729,38 @@ def _chat_groq(system_prompt: str, user_message: str, api_key: str) -> str:
         )
 
 
+
+def _get_pdf_rag_context(query: str, n: int = 5):
+    try:
+        from rag_engine import retrieve_from_pdf, is_pdf_ready, PDF_LOW_CONF_BANNER
+        if not is_pdf_ready():
+            return "", [], False
+        chunks = retrieve_from_pdf(query, n_results=n)
+        if not chunks:
+            return "", [], False
+        best_score = max(c.get("score", 0.0) for c in chunks)
+        if best_score < 0.30:
+            return "", [], True
+        refs = [
+            "[PDF REF {}] (Page {}, score {:.2f})\n{}".format(
+                i, c["page_number"], c["score"], c["text"]
+            )
+            for i, c in enumerate(chunks, 1)
+        ]
+        block = "\n\nREFERENCED CLINICAL CONTEXT (from PDF):\n" + "\n\n".join(refs)
+        sources = [{"file": c["source"], "page": c["page_number"]} for c in chunks]
+        return block, sources, False
+    except Exception:
+        return "", [], False
+
+
 def generate_response(
     user_message: str,
     chat_history: list | None = None,
     mode: str = "local",
     groq_api_key: str = "",
     ocr_context: str = "",
-) -> str:
+) -> tuple:
     """
     Unified LLM router for the Drug Interaction Chat page.
 
@@ -740,9 +791,9 @@ def generate_response(
             "invite them to do so."
         )
         if mode == "cloud":
-            return _chat_groq(_casual_sys, user_message, groq_api_key)
+            return _chat_groq(_casual_sys, user_message, groq_api_key), []
         else:
-            return query_ollama_llm(user_message, [])
+            return query_ollama_llm(user_message, []), []
 
     # Short-circuit for casual/greeting messages -- no clinical framework needed
     _casual_re = re.compile(
@@ -759,9 +810,9 @@ def generate_response(
             "invite them to do so."
         )
         if mode == "cloud":
-            return _chat_groq(_casual_sys, user_message, groq_api_key)
+            return _chat_groq(_casual_sys, user_message, groq_api_key), []
         else:
-            return query_ollama_llm(user_message, [])
+            return query_ollama_llm(user_message, []), []
 
     if mode == "cloud":
         # Re-use the same query-expansion + RAG + system-prompt logic, then send
@@ -779,6 +830,11 @@ def generate_response(
         _msg_gr = user_message
         for _abbr, _full in _SPELL_GR.items():
             _msg_gr = _re_gr.sub(r"\b" + _abbr + r"\b", _full, _msg_gr, flags=_re_gr.IGNORECASE)
+        try:
+            from rag_engine import normalize_query as _nq_gr
+            _msg_gr = _nq_gr(_msg_gr)
+        except Exception:
+            pass
 
         # RAG context (best-effort; falls back gracefully)
         _rag_block_gr = ""
@@ -787,11 +843,51 @@ def generate_response(
         except Exception:
             pass
 
-        # Build system prompt: full clinical framework + RAG
-        _sys_gr = _SYSTEM_CLINICAL + (("\n\nACTIVE PRESCRIPTION CONTEXT (from OCR scan):\n" + ocr_context) if ocr_context else "") + _rag_block_gr
-        return _chat_groq(_sys_gr, _msg_gr, groq_api_key)
+        # PDF RAG context (primary retrieval layer)
+        _pdf_block_gr, _pdf_srcs_gr, _pdf_low_gr = _get_pdf_rag_context(_msg_gr)
+        if _pdf_low_gr:
+            _pdf_block_gr = ""
+        # Build system prompt: clinical framework + JSON RAG + PDF RAG
+        _sys_gr = (
+            _SYSTEM_CLINICAL
+            + (("\n\nACTIVE PRESCRIPTION CONTEXT (from OCR scan):\n" + ocr_context) if ocr_context else "")
+            + _rag_block_gr
+            + _pdf_block_gr
+        )
+        if _pdf_low_gr:
+            _sys_gr += (
+                "\n\nFALLBACK: No high-confidence PDF context found. "
+                "Provide a response based on general clinical knowledge."
+            )
+        _resp_gr = _chat_groq(_sys_gr, _msg_gr, groq_api_key)
+        if _pdf_low_gr:
+            try:
+                from rag_engine import PDF_LOW_CONF_BANNER
+                _resp_gr = PDF_LOW_CONF_BANNER + _resp_gr
+            except Exception:
+                pass
+        return _resp_gr, _pdf_srcs_gr
     else:
+        # PDF RAG context for local path
+        _local_query = user_message
+        try:
+            from rag_engine import normalize_query as _nq_l
+            _local_query = _nq_l(user_message)
+        except Exception:
+            pass
+        _pdf_block_l, _pdf_srcs_l, _pdf_low_l = _get_pdf_rag_context(_local_query)
         _local_msg = user_message
         if ocr_context:
             _local_msg = "ACTIVE PRESCRIPTION CONTEXT (from OCR scan):\n" + ocr_context + "\n\nQuestion: " + user_message
-        return query_ollama_llm(_local_msg, chat_history or [])
+        if _pdf_block_l:
+            # Truncate for local small model to prevent context overflow
+            _pdf_block_l = _pdf_block_l[:1200]
+            _local_msg = _pdf_block_l + "\n\nQuestion: " + _local_msg
+        _resp_l = query_ollama_llm(_local_msg, chat_history or [])
+        if _pdf_low_l:
+            try:
+                from rag_engine import PDF_LOW_CONF_BANNER
+                _resp_l = PDF_LOW_CONF_BANNER + _resp_l
+            except Exception:
+                pass
+        return _resp_l, _pdf_srcs_l

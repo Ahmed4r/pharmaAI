@@ -30,6 +30,7 @@ try:
     from rag_engine import (
         retrieve, build_rag_prompt, is_ready as rag_is_ready,
         format_citations, extract_drug_names, retrieve_interaction,
+        is_pdf_ready,
     )
     RAG_ENGINE_AVAILABLE = True
 except ImportError:
@@ -362,6 +363,12 @@ with st.sidebar:
     # System status panel -- dynamic
     def _sdot(on: bool) -> str:
         return "<span style='color:#66BB6A;'>&#9679;</span>" if on else "<span style='color:#EF5350;'>&#9679;</span>"
+    _pdf_rag_active = False
+    if RAG_ENGINE_AVAILABLE:
+        try:
+            _pdf_rag_active = is_pdf_ready()
+        except Exception:
+            pass
     st.markdown(
         f"""
         <div style='font-size:0.77rem; padding:0 0.2rem; line-height:2;'>
@@ -371,8 +378,8 @@ with st.sidebar:
                 OCR Engine <span style='color:#90C4E0; font-size:0.7rem;'>(Tesseract)</span></div>
             <div>{_sdot(INTERACTION_CHECKER_AVAILABLE)}&nbsp;
                 Interaction Check <span style='color:#90C4E0; font-size:0.7rem;'>({'Active' if INTERACTION_CHECKER_AVAILABLE else 'Unavailable'})</span></div>
-            <div>{_sdot(RAG_ENGINE_AVAILABLE)}&nbsp;
-                RAG Engine <span style='color:#90C4E0; font-size:0.7rem;'>({'Indexed' if RAG_ENGINE_AVAILABLE else 'Offline'})</span></div>
+            <div>{_sdot(_pdf_rag_active)}&nbsp;
+                RAG Engine <span style='color:#90C4E0; font-size:0.7rem;'>({'ChromaDB (Active)' if _pdf_rag_active else 'ChromaDB (Inactive)'})</span></div>
             <div>{_sdot(True)}&nbsp;
                 Drug DB <span style='color:#90C4E0; font-size:0.7rem;'>(SQLite · Live)</span></div>
         </div>
@@ -1286,6 +1293,21 @@ elif active_page == "Drug Interaction Chat":
                                 unsafe_allow_html=True,
                             )
                 st.markdown(_content, unsafe_allow_html=True)
+                # Source badge for PDF-retrieved content
+                _msg_sources = msg.get("sources", [])
+                if _msg_sources and msg["role"] == "assistant":
+                    _badges = " &nbsp;".join(
+                        "<span style='display:inline-block;background:#E3F2FD;"
+                        "border:1px solid #1A6B8A;color:#0B3C5D;"
+                        "border-radius:20px;padding:2px 10px;"
+                        "font-size:.72rem;font-weight:600;margin:2px 1px;'>"
+                        f"📚 Source: {s['file']}, Page {s['page']}</span>"
+                        for s in _msg_sources
+                    )
+                    st.markdown(
+                        f"<div style='margin-top:4px;'>{_badges}</div>",
+                        unsafe_allow_html=True,
+                    )
 
         # Immediately show typing dots, then call LLM and replace with response
         if st.session_state.get("pending_input"):
@@ -1308,7 +1330,7 @@ elif active_page == "Drug Interaction Chat":
                 if isinstance(_raw, dict):
                     import json as _json
                     _ocr_ctx += "\nFull OCR data: " + _json.dumps(_raw, ensure_ascii=False)[:1200]
-            llm_resp = generate_response(
+            llm_resp, _resp_sources = generate_response(
                 _q,
                 st.session_state.chat_history,
                 mode=st.session_state.get("llm_mode", "local"),
@@ -1317,7 +1339,8 @@ elif active_page == "Drug Interaction Chat":
             )
             if llm_resp:
                 st.session_state.chat_history.append(
-                    {"role": "assistant", "content": llm_resp}
+                    {"role": "assistant", "content": llm_resp,
+                     "sources": _resp_sources}
                 )
             st.rerun()
 

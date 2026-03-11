@@ -1,6 +1,6 @@
 ﻿=========================================================
   pharmaAI  SYSTEM ARCHITECTURE & PROGRESS SUMMARY
-  Last Updated: March 11, 2026
+  Last Updated: March 11, 2026  (Sessions 5-7)  (Sessions 5-7)
   Repo: Ahmed4r/pharmaAI  |  Branch: main
 =========================================================
 
@@ -536,7 +536,126 @@ D) Confirm button action:
    flow adds exactly one manual confirmation step.
 
 
-SECTION 6  COMPLETE FILE STATUS
+
+SECTION 6  SESSION 5 CHANGES  PDF RAG Pipeline
+
+
+ingest.py  NEW FILE
+  python ingest.py knowledge_base/BNF80.pdf
+  PyPDFLoader -> RecursiveCharacterTextSplitter(800, 150)
+              -> HuggingFaceEmbeddings all-MiniLM-L6-v2 cpu
+              -> PersistentClient ./chroma_db  collection: pdf_kb
+  Result: 16,524 chunks from BNF80.pdf 1,781 pages
+
+rag_engine.py  New PDF functions
+  retrieve_from_pdf(user_query, n_results=5) -> list[dict]
+    - normalize_query first, embed, query pdf_kb cosine >= 0.30
+    - returns {text, page, file, score}
+  is_pdf_ready() -> bool  (pdf_kb has >= 1 document)
+  PDF_LOW_CONF_BANNER  (warning if score < 0.40)
+  _get_hf_embedder()  singleton; all-MiniLM-L6-v2; normalize=True
+
+chatbot.py  PDF context integration
+  _get_pdf_rag_context(query, n=5) -> tuple[str, list]
+  generate_response() returns tuple[str, list[sources]]
+    sources = [{"file": str, "page": int}, ...]
+  PDF block injected into <<SYS>> NOT [INST]
+  n=5 for both cloud and local retrieval paths
+
+app.py  Source badge + ChromaDB status
+  sidebar badge: ChromaDB Active/Inactive via is_pdf_ready()
+  source badge after RAG responses: "BNF80.pdf, Page N"
+  generate_response() tuple unpack: llm_resp, _resp_sources
+
+
+SECTION 7  SESSION 6 CHANGES  Bug Fix Cascade
+
+
+Bug 1  Context Mismatch for drug queries
+  Symptom: "Context Mismatch -- Cannot Answer Reliably" even with
+           correct BNF sources shown for aspirin+warfarin.
+  Cause:   Step 3j mismatch guard checked JSON pharma_kb; found no
+           drug names there (only PDF context present); fired error.
+  Fix:     _has_pdf_ctx flag skips mismatch guard when PDF context
+           present (chatbot.py line 421).
+
+Bug 2  Empty response / Arabic fallback
+  Symptoms: Arabic string for "model produced no output".
+  Causes:   (a) num_ctx 2048 too small; PDF block overflowed context.
+            (b) PDF block in [INST] as "Clinical question: REFERENCED
+                CLINICAL CONTEXT..." -- malformed LLaMA-2 prompt.
+  Fixes:    num_ctx 2048 -> 4096; _pdf_block_l[:1200] truncation;
+            PDF block extracted via _PDF_CTX_SEP and injected into
+            system prompt as _pdf_ctx_injected.
+
+Bug 3  Header-only response
+  Symptom: Model returned only "MAJOR INTERACTION DETECTED" + stopped.
+  Cause:   _SYS template started with severity header; BioMistral 7B
+           echoed it as complete answer.
+  Fixes:   Removed header from _SYS; changed task to "Start with
+           **Drugs:**"; Python post-gen prepend + regex echo strip.
+
+Bug 4  Only MAJOR severity ever shown (was bool)
+  Cause:   Old _is_major bool -- could not emit MODERATE or MINOR.
+  Fix:     Replaced with _severity str "MAJOR"/"MODERATE"/"MINOR"/""
+           DB lookup + PDF keyword fallback:
+             avoid/contraindicated -> MAJOR
+             caution/monitor       -> MODERATE
+             minor/minimal         -> MINOR
+
+Bug 5  UnboundLocalError: severity on dosing queries
+  Cause:   _severity only set inside elif _is_clinical: branch;
+           dosing/non-clinical paths left it unset.
+  Fix:     Pre-init _severity = "" at line 318 before all branches.
+
+
+SECTION 8  SESSION 7 CHANGES  RAG Upgrade: Brand Mapping + k=5 + 4-Section Output
+
+
+Feature 1  BRAND_MAP + normalize_query() in rag_engine.py
+  BRAND_MAP dict: 50+ brand->generic entries
+    mesopral / nexium -> esomeprazole
+    concor            -> bisoprolol
+    novaclar          -> clarithromycin
+    coumadin          -> warfarin
+    plavix            -> clopidogrel
+    lipitor           -> atorvastatin
+    norvasc           -> amlodipine   ... (50+ total)
+
+  normalize_query(query: str) -> str
+    whole-word regex replacement for each BRAND_MAP entry
+    drug_normalizer fallback if confidence >= 0.80
+
+Feature 2  k=5 Retrieval Depth
+  retrieve_from_pdf() n_results default 3 -> 5
+  _get_pdf_rag_context() n default 3 -> 5
+
+Feature 3  Brand Normalization in Both LLM Paths
+  Cloud path:  normalize_query as _nq_gr before retrieve_from_pdf()
+  Local path:  _local_query = normalize_query(user_message)
+
+Feature 4  4-Section _SYSTEM_CLINICAL Prompt
+  Section 1: Drug Identification -- generic INN names + drug classes
+  Section 2: Interaction Alerts -- severity, mechanism, outcome
+             emits "WARNING: {SEVERITY} INTERACTION DETECTED"
+  Section 3: Clinical Rationale -- extract from BNF: absorption,
+             bioavailability, CYP450, receptor binding
+             label [Mechanism of Action]: if not in BNF context
+  Section 4: BNF References -- cite page numbers from REFERENCED
+             CLINICAL CONTEXT
+
+  Same 4-section format applied to local _SYS interaction mode.
+
+Verified smoke tests:
+  normalize_query("Mesopral 40 mg meal timing")
+    -> "esomeprazole 40 mg meal timing"     OK
+  normalize_query("concor dose in heart failure")
+    -> "bisoprolol dose in heart failure"   OK
+  normalize_query("novaclar interaction warfarin")
+    -> "clarithromycin interaction warfarin" OK
+
+
+SECTION 9  COMPLETE FILE STATUS
 
 
 File                     Status        Changes
@@ -553,11 +672,15 @@ drug_lookup.py           MODIFIED      3-tier rewrite + INN/USAN +
                                         OTC fields + cache helpers
 database.py              MODIFIED      openfda_cache table in schema
 dosing_validator.py      MODIFIED      check_pediatric_dose() added
-rag_engine.py            UNCHANGED     ChromaDB + TF-IDF RAG
+rag_engine.py            MODIFIED      PDF RAG: BRAND_MAP, normalize_query,
+                                        k=5 retrieval, retrieve_from_pdf,
+                                        is_pdf_ready, PDF_LOW_CONF_BANNER
 drug_db.py               UNCHANGED     SQLite + JSON fallback
+ingest.py                NEW           PDF ingestion pipeline
+                                        PyPDFLoader->all-MiniLM->chroma_db/
 
 
-SECTION 7  SYSTEM ARCHITECTURE DIAGRAM (CURRENT)
+SECTION 10  SYSTEM ARCHITECTURE DIAGRAM (CURRENT)
 
 
 Prescription Image
@@ -661,7 +784,7 @@ BioMistral 7B via Ollama (http://localhost:11434)
   - RAG context injected as VERIFIED CLINICAL REFERENCES
 
 
-SECTION 8  ENVIRONMENT & DEPENDENCIES
+SECTION 11  ENVIRONMENT & DEPENDENCIES
 
 
 Python: 3.10 | Windows | venv: .venv
@@ -683,7 +806,7 @@ Run app:
   streamlit run app.py
 
 
-SECTION 9  TASKS COMPLETED / PENDING
+SECTION 12  TASKS COMPLETED / PENDING
 
 
 COMPLETED:
@@ -728,6 +851,46 @@ COMPLETED:
   [x] app.py -- Confirm & Proceed button wires corrected names
       back into raw_json before running safety analysis
 
+  [x] ingest.py -- PDF ingestion pipeline (BNF80.pdf -> 16524 chunks)
+  [x] rag_engine.py -- retrieve_from_pdf, is_pdf_ready, PDF_LOW_CONF_BANNER
+  [x] chatbot.py -- generate_response() returns tuple(str, list[sources])
+  [x] chatbot.py -- PDF context injected into <<SYS>> not [INST]
+  [x] chatbot.py -- num_ctx 4096 (was 2048)
+  [x] chatbot.py -- _has_pdf_ctx guard bypass for Context Mismatch
+  [x] chatbot.py -- _severity str MAJOR/MODERATE/MINOR (was bool)
+  [x] chatbot.py -- UnboundLocalError _severity pre-init at line 318
+  [x] chatbot.py -- Python post-gen severity header + echo strip
+  [x] rag_engine.py -- BRAND_MAP 50+ brand->generic entries
+  [x] rag_engine.py -- normalize_query() whole-word regex substitution
+  [x] rag_engine.py -- k=5 default retrieve_from_pdf
+  [x] chatbot.py -- k=5 default _get_pdf_rag_context
+  [x] chatbot.py -- brand normalization in cloud AND local paths
+  [x] chatbot.py -- 4-section _SYSTEM_CLINICAL prompt
+  [x] chatbot.py -- local _SYS updated to 4-section format
+  [x] app.py -- sidebar ChromaDB status via is_pdf_ready
+  [x] app.py -- BNF page source badges after RAG responses
+  [x] .gitignore -- added chroma_db/, *.db, knowledge_base/*.pdf, _*.py
+
+  [x] ingest.py -- PDF ingestion pipeline (BNF80.pdf -> 16524 chunks)
+  [x] rag_engine.py -- retrieve_from_pdf, is_pdf_ready, PDF_LOW_CONF_BANNER
+  [x] chatbot.py -- generate_response() returns tuple(str, list[sources])
+  [x] chatbot.py -- PDF context injected into <<SYS>> not [INST]
+  [x] chatbot.py -- num_ctx 4096 (was 2048)
+  [x] chatbot.py -- _has_pdf_ctx guard bypass for Context Mismatch
+  [x] chatbot.py -- _severity str MAJOR/MODERATE/MINOR (was bool)
+  [x] chatbot.py -- UnboundLocalError _severity pre-init at line 318
+  [x] chatbot.py -- Python post-gen severity header + echo strip
+  [x] rag_engine.py -- BRAND_MAP 50+ brand->generic entries
+  [x] rag_engine.py -- normalize_query() whole-word regex substitution
+  [x] rag_engine.py -- k=5 default retrieve_from_pdf
+  [x] chatbot.py -- k=5 default _get_pdf_rag_context
+  [x] chatbot.py -- brand normalization in cloud AND local paths
+  [x] chatbot.py -- 4-section _SYSTEM_CLINICAL prompt
+  [x] chatbot.py -- local _SYS updated to 4-section format
+  [x] app.py -- sidebar ChromaDB status via is_pdf_ready
+  [x] app.py -- BNF page source badges after RAG responses
+  [x] .gitignore -- added chroma_db/, *.db, knowledge_base/*.pdf, _*.py
+
 POSSIBLE FUTURE IMPROVEMENTS:
   [ ] Expand drug_normalizer.py catalog beyond 200 entries
   [ ] Expand _INN_TO_USAN mappings beyond 10 entries
@@ -738,5 +901,13 @@ POSSIBLE FUTURE IMPROVEMENTS:
   [ ] Add renal/hepatic dose adjustment validator
   [ ] Expand STRICT_RULES with more administration-critical drugs
   [ ] Cache eviction strategy (manual purge or size limit)
+  [ ] Settings persistence (.env save on change)
+  [ ] Dashboard quick-action navigation fix
+  [ ] Multi-PDF ingest (upsert mode instead of delete+recreate)
+  [ ] Deduplicate _casual_re block in generate_response()
+  [ ] Settings persistence (.env save on change)
+  [ ] Dashboard quick-action navigation fix
+  [ ] Multi-PDF ingest (upsert mode instead of delete+recreate)
+  [ ] Deduplicate _casual_re block in generate_response()
 
 =========================================================
