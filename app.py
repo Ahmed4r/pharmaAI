@@ -295,7 +295,7 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
         )
         if not api_key:
             raise ValueError(
-                "Gemini API key not set. Add it in ⚙️ Settings → OCR Engine."
+                "Gemini API key not set. Check your .env file for GEMINI_API_KEY."
             )
 
         # For Gemini vision: only upscale if too small  no aggressive CV processing
@@ -509,7 +509,7 @@ def analyze_prescription_safety(parsed_meds: list, patient: str = "",
             or st.secrets.get("GROQ_API_KEY", "")
         )
         if not api_key:
-            raise ValueError("Groq API key not set. Add it in Settings.")
+            raise ValueError("Groq API key not set. Check your .env file for GROQ_API_KEY.")
         meds_text = _json.dumps(parsed_meds, indent=2)
         prompt = (
             "You are a clinical pharmacist AI. Analyse the following prescription medications "
@@ -1151,7 +1151,7 @@ st.markdown(CLINICAL_CSS, unsafe_allow_html=True)
 # Handle ?nav= from left-drawer links
 try:
     _qnav = st.query_params.get("nav")
-    _QP_PAGES = ["Dashboard", "Prescription Scanner", "Drug Interaction Chat", "Drug Lookup", "Settings"]
+    _QP_PAGES = ["Dashboard", "Prescription Scanner", "Drug Interaction Chat", "Drug Lookup"]
     if _qnav and _qnav in _QP_PAGES:
         st.session_state["nav_page"] = _qnav
         st.query_params.clear()
@@ -1188,7 +1188,6 @@ with st.sidebar:
         u"📋  Prescription Scanner",
         u"💬  Drug Interaction Chat",
         u"🔍  Drug Lookup",
-        u"⚙️  Settings",
     ]
     _NAV_LABELS = [o.split("  ", 1)[-1].strip() for o in _NAV_OPTIONS]
     _nav_target = st.session_state.pop("nav_page", None)
@@ -1234,7 +1233,7 @@ with st.sidebar:
 
 
 # --- GLOBAL LEFT DRAWER (injected via window.parent) ---
-_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\'],\n    [\'\\u2699\\uFE0F\',\'Settings\',\'Configure connections &amp; API keys\']\n  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
+_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\'],\  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
 
 
 # --- PAGE: DASHBOARD ---
@@ -1744,7 +1743,7 @@ elif active_page == "Prescription Scanner":
                                     if not _wh:
                                         st.warning(
                                             "&#9888;&#65039; No n8n webhook URL. "
-                                            "Configure it in &#9881;&#65039; Settings."
+                                            "Configure it in"
                                         )
                                     else:
                                         _ok = send_n8n_alert(_wh, {
@@ -2083,130 +2082,3 @@ elif active_page == "Drug Lookup":
         st.warning("Please enter a drug name to search.")
 
 
-# --- PAGE: SETTINGS ---
-
-elif active_page == "Settings":
-    _bb, _ = st.columns([1, 7])
-    with _bb:
-        if st.button(u"← Dashboard", key="back_settings", use_container_width=True):
-            st.session_state["nav_page"] = "Dashboard"
-            st.rerun()
-    st.markdown("<div class='section-header'>⚙️ Settings</div>", unsafe_allow_html=True)
-    st.markdown(
-        "<div class='section-sub'>Configure backend connections and application preferences</div>",
-        unsafe_allow_html=True,
-    )
-
-    # Ollama
-    with st.expander("🤖  Ollama LLM Configuration", expanded=True):
-        oc1, oc2 = st.columns(2)
-        with oc1:
-            st.text_input("Ollama Host", value="http://localhost:11434", key="ol_host")
-            st.selectbox(
-                "Model",
-                ["adrienbrault/biomistral-7b:Q4_K_M", "meditron-7b", "llama3", "medllama2", "mistral", "custom..."],
-                key="ol_model",
-            )
-        with oc2:
-            st.slider("Request Timeout (s)", 10, 180, 60, key="ol_timeout")
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔗  Test Ollama Connection", key="ol_test"):
-                with st.spinner("Pinging Ollama service..."):
-                    try:
-                        import ollama as _ol
-                        _ol.Client(host=st.session_state.get('ol_host','http://localhost:11434')).list()
-                        _ok = True
-                    except Exception as _e:
-                        _ok = False ; _err = str(_e)
-                if _ok:
-                    st.success('Connected to Ollama  BioMistral is ready.')
-                else:
-                    st.error(f'Connection failed: {_err}')
-
-        st.text_area(
-            "System Prompt",
-             value=(
-                "You are an expert clinical pharmacist AI. "
-                "Answer drug questions directly and concisely. "
-                "For drug interactions always state: severity (MAJOR/MODERATE/MINOR), "
-                "mechanism (name the enzyme e.g. CYP2C9), clinical effect, "
-                "dose adjustment needed, and monitoring parameters with frequency. "
-                "Use markdown headers and tables where helpful. "
-                "Flag contraindications with ⚠️. "
-                "Respond in the same language the user writes in. "
-                "End every answer with: ⚠️ Always verify with a licensed pharmacist or prescriber."
-            ),
-            height=110,
-            key="ol_system_prompt_custom",
-        )
-
-    # OCR
-    with st.expander("🔬  OCR Engine Configuration", expanded=False):
-        st.markdown("**Gemini 2.5 Flash (prescription OCR)**")
-        st.text_input("Gemini API Key", type="password", key="gemini_api_key",
-                      help="Required for prescription scanning. Get yours at aistudio.google.com")
-        st.divider()
-        st.markdown("**Groq Vision API (safety analysis)**")
-        st.text_input("Groq API Key", type="password", key="groq_api_key",
-                      help="Used for drug safety analysis. Get yours at console.groq.com")
-        st.divider()
-        ocr_engine = st.selectbox(
-            "OCR Engine",
-            ["Tesseract (Local)", "EasyOCR (Local)", "Google Vision API",
-             "Azure Cognitive Services"],
-            key="ocr_engine",
-        )
-        if ocr_engine == "Google Vision API":
-            st.text_input("Google Vision API Key", type="password", key="gv_key")
-        elif ocr_engine == "Azure Cognitive Services":
-            az1, az2 = st.columns(2)
-            with az1:
-                st.text_input("Azure API Key", type="password", key="az_key")
-            with az2:
-                st.text_input("Azure Endpoint", key="az_endpoint")
-        st.slider(
-            "Minimum OCR Confidence Threshold", 0.50, 1.00, 0.75, 0.05,
-            key="ocr_threshold",
-        )
-        st.checkbox("Pre-process image (deskew, denoise)", value=True, key="ocr_preprocess")
-
-    # Drug Database
-    with st.expander("💊  Drug Database Configuration", expanded=False):
-        db_source = st.selectbox(
-            "Primary Database",
-            ["Local Demo", "RxNorm API (Free)", "DrugBank API", "OpenFDA API (Free)"],
-            key="db_source",
-        )
-        if db_source != "Local Demo":
-            st.text_input(f"{db_source} API Key", type="password", key="db_key")
-        st.checkbox("Cache API responses (24 h)", value=True, key="db_cache")
-
-    # Display Preferences
-    with st.expander("🎨  Display Preferences", expanded=False):
-        st.checkbox("Show OCR confidence score",             value=True,  key="show_conf")
-        st.checkbox("Auto-check interactions after OCR",     value=True,  key="auto_check")
-        st.checkbox("Show verbose pharmacological details",  value=False, key="verbose")
-        st.number_input("Max results per query", 5, 100, 10, key="max_results")
-
-    # Automation / n8n
-    with st.expander("&#128279;  Automation / n8n Integration", expanded=False):
-        st.markdown(
-            "Connect an [n8n](https://n8n.io) webhook to receive automated alerts "
-            "when critical prescription errors are detected."
-        )
-        st.text_input(
-            "n8n Webhook URL",
-            value=st.session_state.get("n8n_webhook_url", ""),
-            key="n8n_webhook_url",
-            placeholder="https://your-n8n.example.com/webhook/prescription-alert",
-            help="POST alerts sent when major dosing/interaction errors are detected.",
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    cs1, cs2, _ = st.columns([1, 1, 4])
-    with cs1:
-        if st.button("💾  Save Settings", use_container_width=True, key="save_btn"):
-            st.success("Settings saved.")
-    with cs2:
-        if st.button("↩️  Reset Defaults", use_container_width=True, key="reset_btn"):
-            st.info("Settings reset to defaults.")
