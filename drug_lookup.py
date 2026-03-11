@@ -7,6 +7,36 @@ Tiers for lookup_drug_info():
 from __future__ import annotations
 import re, urllib.request, urllib.parse, json as _json
 
+# INN (international) -> USAN (US/FDA) name equivalences for OpenFDA lookups
+_INN_TO_USAN: dict[str, str] = {
+    "paracetamol":   "acetaminophen",
+    "salbutamol":    "albuterol",
+    "adrenaline":    "epinephrine",
+    "noradrenaline": "norepinephrine",
+    "suxamethonium": "succinylcholine",
+    "lignocaine":    "lidocaine",
+    "frusemide":     "furosemide",
+    "glibenclamide": "glyburide",
+    "pethidine":     "meperidine",
+    "amfetamine":    "amphetamine",
+}
+
+
+# INN (international) -> USAN (US/FDA) name equivalences for OpenFDA lookups
+_INN_TO_USAN: dict[str, str] = {
+    "paracetamol":   "acetaminophen",
+    "salbutamol":    "albuterol",
+    "adrenaline":    "epinephrine",
+    "noradrenaline": "norepinephrine",
+    "suxamethonium": "succinylcholine",
+    "lignocaine":    "lidocaine",
+    "frusemide":     "furosemide",
+    "glibenclamide": "glyburide",
+    "pethidine":     "meperidine",
+    "amfetamine":    "amphetamine",
+}
+
+
 
 #  helpers 
 
@@ -27,6 +57,11 @@ def _clean(text: str, max_chars: int = 400) -> str:
         r"^(INDICATIONS\s*AND\s*USAGE|CONTRAINDICATIONS|"
         r"ADVERSE\s*REACTIONS?|DOSAGE\s*AND\s*ADMINISTRATION"
         r"|DESCRIPTION|CLINICAL\s*PHARMACOLOGY)\s*[:\.\s]+",
+        "", t, flags=re.I,
+    )
+    # Strip OTC Drug Facts section header words
+    t = re.sub(
+        r"^(Purpose|Uses|Directions|Warnings|Do not use|Stop use|Ask a doctor)[\s:]+",
         "", t, flags=re.I,
     )
     return t[:max_chars].rstrip(" ,;") + ("..." if len(t) > max_chars else "")
@@ -79,6 +114,10 @@ def _openfda_lookup(name: str) -> dict | None:
             if any(name_l in n or n in name_l for n in all_names):
                 return _parse_openfda_label(label)
 
+    # Retry with US (USAN/FDA) name if INN name not found in OpenFDA
+    usan = _INN_TO_USAN.get(name.lower().strip())
+    if usan:
+        return _openfda_lookup(usan)
     return None
 
 
@@ -101,24 +140,41 @@ def _parse_openfda_label(label: dict) -> dict:
             drug_class = re.sub(r"\s*\[.*?\]", "", epc[0]).strip()
             break
 
-    # Mechanism of action / description
+    # Drug class OTC fallback: use purpose field if no pharm_class_epc
+    if not drug_class:
+        purpose = (label.get("purpose") or [])
+        if purpose:
+            dc_raw = re.sub(r"^Purpose\s+", "", purpose[0], flags=re.I).strip()
+            drug_class = ", ".join(p.strip() for p in dc_raw.split("\n") if p.strip())[:60]
+
+    # Mechanism: Rx label fields + OTC active_ingredient as fallback
     mechanism_raw = (
         (label.get("mechanism_of_action") or []) +
         (label.get("description") or []) +
         (label.get("clinical_pharmacology") or [])
     )
+    if not mechanism_raw:
+        # OTC labels: purpose describes the drug action
+        mechanism_raw = label.get("purpose") or []
     mechanism = _clean(" ".join(mechanism_raw), 500) if mechanism_raw else ""
 
     # Indications
     ind_raw = " ".join(label.get("indications_and_usage") or [])
     indications = _sentences(_clean(ind_raw, 1000), 5) if ind_raw else []
 
-    # Contraindications
-    ci_raw = " ".join(label.get("contraindications") or [])
+    # Contraindications (Rx label or OTC do_not_use)
+    ci_raw = " ".join(
+        (label.get("contraindications") or []) +
+        (label.get("do_not_use") or [])
+    )
     contraindications = _sentences(_clean(ci_raw, 1000), 5) if ci_raw else []
 
-    # Side effects
-    se_raw = " ".join(label.get("adverse_reactions") or [])
+    # Side effects (Rx adverse_reactions or OTC warnings/stop_use)
+    se_raw = " ".join(
+        (label.get("adverse_reactions") or []) +
+        (label.get("warnings") or []) +
+        (label.get("stop_use") or [])
+    )
     side_effects = _sentences(_clean(se_raw, 1000), 6) if se_raw else []
 
     # Dosage
@@ -137,7 +193,8 @@ def _parse_openfda_label(label: dict) -> dict:
     preg_raw = " ".join(
         (label.get("pregnancy") or []) +
         (label.get("teratogenic_effects") or []) +
-        (label.get("use_in_specific_populations") or [])
+        (label.get("use_in_specific_populations") or []) +
+        (label.get("pregnancy_or_breast_feeding") or [])
     )
     m = re.search(r"Pregnancy\s+Category\s+([A-DX])\b", preg_raw, re.I)
     if m:
@@ -274,7 +331,7 @@ def lookup_drug_info(drug_name: str) -> dict:
                 u  = dr.get("unit", "mg")
                 frq = dr.get("frequency", "")
                 dosage = f"{mn}-{mx} {u} {frq}".strip("- ")
-            return {
+            local_result = {
                 "generic_name":       d.get("generic_name", search_name),
                 "brand_names":        d.get("brand_names") or [],
                 "drug_class":         d.get("drug_class", ""),
@@ -287,6 +344,27 @@ def lookup_drug_info(drug_name: str) -> dict:
                 "renal_adjustment":   dr.get("renal_adjustment", "") if dr else "",
                 "_source":            "local",
             }
+            # If the local entry has structured clinical data, return it immediately
+            _has_clinical = (
+                local_result["mechanism"] or
+                local_result["indications"] or
+                local_result["contraindications"] or
+                local_result["side_effects"] or
+                local_result["dosage"]
+            )
+            if _has_clinical:
+                return local_result
+            # Local entry exists but lacks structured clinical fields (e.g. JSON-only overview blob).
+            # Enrich silently from OpenFDA, preserving the confirmed generic name.
+            _openfda = _openfda_lookup(local_result["generic_name"])
+            if _openfda:
+                _openfda["generic_name"] = local_result["generic_name"]
+                _openfda["brand_names"]  = list(dict.fromkeys(
+                    local_result["brand_names"] + _openfda.get("brand_names", [])
+                ))
+                _openfda["_source"] = "local"
+                return _openfda
+            return local_result  # Return even if empty rather than risk wrong API match
     except Exception:
         pass
 
