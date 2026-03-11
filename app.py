@@ -305,10 +305,9 @@ try:
     _QP_PAGES = ["Dashboard", "Prescription Scanner", "Drug Interaction Chat", "Drug Lookup"]
     if _qnav and _qnav in _QP_PAGES:
         st.session_state["nav_page"] = _qnav
+        del st.query_params["nav"]  # only remove nav; keep ?model= so it persists
     if _qmodel in ("cloud", "local"):
         st.session_state["llm_mode"] = _qmodel
-    if _qnav or _qmodel:
-        st.query_params.clear()
 except Exception:
     pass
 
@@ -422,7 +421,7 @@ _drawer_html = (
     '      ".pd-mrow{display:flex;gap:.5rem;margin:.1rem 0 .6rem;}",\n'
     '      ".pd-mbtn{flex:1;padding:.55rem .4rem;border:2px solid #CBD5E0;border-radius:8px;",\n'
     '        "background:#F8FBFD;color:#0B3C5D;font-size:.82rem;font-weight:600;cursor:pointer;",\n'
-    '        "transition:all .15s;text-align:center;}",\n'
+    '        "transition:all .15s;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;}",\n'
     '      ".pd-mbtn:hover{background:#E3F2FD;border-color:#1A6B8A;}",\n'
     '      ".pd-mbtn.on{background:#1A6B8A;border-color:#1A6B8A;color:#fff;}",\n'
     '      ".pd-active{font-size:.72rem;color:#6B8CAE;margin-top:.25rem;text-align:center;}"\n'
@@ -431,14 +430,6 @@ _drawer_html = (
     '  }\n'
     '  p._pdOpen  = function(){ d.getElementById("_pd_panel").classList.add("open");    d.getElementById("_pd_bd").style.display="block"; };\n'
     '  p._pdClose = function(){ d.getElementById("_pd_panel").classList.remove("open"); d.getElementById("_pd_bd").style.display="none"; };\n'
-    '  p._pdM = function(m){\n'
-    '    ["_pdM_cloud","_pdM_local"].forEach(function(id){ var b=d.getElementById(id); if(b) b.className="pd-mbtn"; });\n'
-    '    var active = d.getElementById("_pdM_"+m);\n'
-    '    if(active) active.className="pd-mbtn on";\n'
-    '    var lbl = d.getElementById("_pdM_lbl");\n'
-    '    if(lbl) lbl.textContent = (m==="cloud" ? "\u2601\ufe0f llama-3.3-70b (Groq)" : "\U0001f4bb BioMistral-7B (Ollama)");\n'
-    '    window.parent.location.href = "?model=" + m;\n'
-    '  };\n'
     '  ["_pd_bd","_pd_panel","_pd_tab"].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n'
     '  var bd = d.createElement("div");\n'
     '  bd.id = "_pd_bd";\n'
@@ -469,8 +460,8 @@ _drawer_html = (
     + '    }).join("") +\n'
     + '    \'<div class="pd-sec" style="margin-top:1.2rem;">AI ENGINE</div>\' +\n'
     + '    \'<div class="pd-mrow">\' +\n'
-    + '    \'<button id="_pdM_cloud" class="pd-mbtn\' + cloudOn + \'" onclick="_pdM(\\\'cloud\\\')">\u2601\ufe0f Cloud (Groq)</button>\' +\n'
-    + '    \'<button id="_pdM_local" class="pd-mbtn\' + localOn + \'" onclick="_pdM(\\\'local\\\')">\U0001f4bb Local (Ollama)</button>\' +\n'
+    + '    \'<a class="pd-mbtn\' + cloudOn + \'" href="?model=cloud">\u2601\ufe0f Cloud (Groq)</a>\' +\n'
+    + '    \'<a class="pd-mbtn\' + localOn + \'" href="?model=local">\U0001f4bb Local (Ollama)</a>\' +\n'
     + '    \'</div>\' +\n'
     + '    \'<div id="_pdM_lbl" class="pd-active">\' + activeLbl + \'</div>\' +\n'
     + '    \'</div>\';\n'
