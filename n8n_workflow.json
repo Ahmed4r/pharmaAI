@@ -51,18 +51,12 @@
       "parameters": {
         "method": "POST",
         "url": "http://localhost:8000/ocr",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Content-Type",
               "value": "application/json"
-            },
-            {
-              "name": "X-API-Key",
-              "value": "={{ $env.PHARMA_API_KEY }}"
             }
           ]
         },
@@ -117,10 +111,6 @@
             {
               "name": "Content-Type",
               "value": "application/json"
-            },
-            {
-              "name": "X-API-Key",
-              "value": "={{ $env.PHARMA_API_KEY }}"
             }
           ]
         },
@@ -241,17 +231,8 @@
         300
       ],
       "parameters": {
-        "options": {
-          "responseBody": "={{ JSON.stringify($('PharmaAI RAG Query').first().json) }}",
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
-            ]
-          }
-        }
+        "respondWith": "firstIncomingItem",
+        "options": {}
       },
       "notes": "Returns the StructuredClinicalResponse JSON back to the mobile app."
     }
