@@ -232,6 +232,8 @@ from ocr import (
     analyze_prescription_safety,
 )
 from chatbot import query_ollama_llm, generate_response
+import threading as _threading
+
 from drug_lookup import check_drug_interactions, lookup_drug_info
 
 
@@ -924,6 +926,17 @@ elif active_page == "Prescription Scanner":
                                 ),
                             )
                         st.session_state.safety_result = _safety
+                        _wh = st.session_state.get("n8n_webhook_url", "")
+                        if _wh:
+                            _meds_q = " ".join(
+                                m.get("name", "") for m in parsed_meds if m.get("name")
+                            )
+                            if _meds_q:
+                                _threading.Thread(
+                                    target=send_n8n_alert,
+                                    args=(_wh, {"query": _meds_q}),
+                                    daemon=True,
+                                ).start()
                         st.rerun()
 
                 # --- MODULE 4: Low-Confidence Manual Override ---
@@ -975,6 +988,17 @@ elif active_page == "Prescription Scanner":
                             )
                         st.session_state.safety_result = _safety
                         st.session_state.show_low_conf_review = False
+                        _wh = st.session_state.get("n8n_webhook_url", "")
+                        if _wh:
+                            _pm_meds_q = " ".join(
+                                m.get("name", "") for m in _pm_live if m.get("name")
+                            )
+                            if _pm_meds_q:
+                                _threading.Thread(
+                                    target=send_n8n_alert,
+                                    args=(_wh, {"query": _pm_meds_q}),
+                                    daemon=True,
+                                ).start()
                         st.rerun()
 
                 _sr = st.session_state.get("safety_result")
@@ -1113,13 +1137,11 @@ elif active_page == "Prescription Scanner":
                                             "Configure it in"
                                         )
                                     else:
-                                        _ok = send_n8n_alert(_wh, {
-                                            "event": "prescription_safety_alert",
-                                            "patient": ocr.get("patient", ""),
-                                            "prescriber": ocr.get("prescriber", ""),
-                                            "medications": raw_json.get("medications", []),
-                                            "safety_report": _sr,
-                                        })
+                                        _btn_meds = " ".join(
+                                            m.get("name", "") if isinstance(m, dict) else str(m)
+                                            for m in (raw_json.get("medications") or [])
+                                        )
+                                        _ok = send_n8n_alert(_wh, {"query": _btn_meds or "prescription check"})
                                         if _ok:
                                             st.success("&#9989; Alert sent to n8n!")
                                         else:
@@ -1342,6 +1364,13 @@ elif active_page == "Drug Interaction Chat":
                     {"role": "assistant", "content": llm_resp,
                      "sources": _resp_sources}
                 )
+            _wh = st.session_state.get("n8n_webhook_url", "")
+            if _wh and _q:
+                _threading.Thread(
+                    target=send_n8n_alert,
+                    args=(_wh, {"query": _q}),
+                    daemon=True,
+                ).start()
             st.rerun()
 
     # Input bar - append user msg immediately, set pending, rerun to show dots
