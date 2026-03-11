@@ -43,36 +43,17 @@
       "id": "3",
       "name": "PharmaAI OCR - Prescription Analysis",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 3,
+      "typeVersion": 4,
       "position": [
         720,
         180
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/ocr",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
+        "url": "http://127.0.0.1:8000/ocr",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "image_url",
-              "value": "={{ $json.body.image_url }}"
-            },
-            {
-              "name": "patient_weight_kg",
-              "value": "={{ $json.body.patient_weight_kg || 0 }}"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
         "options": {
           "timeout": 30000
         }
@@ -89,7 +70,7 @@
         180
       ],
       "parameters": {
-        "jsCode": "// Extract drug names from OCR and build a RAG query\nconst ocrData = $json.ocr || {};\nconst safetyData = $json.safety || {};\nconst drugNames = ($json.drug_names || []).filter(Boolean).join(' and ');\nconst hasMajor = $json.has_major_interaction;\n\n// Build a targeted clinical query from OCR results\nconst queryParts = [];\nif (drugNames) queryParts.push(drugNames + ' interaction');\nif (safetyData.dosing_errors && safetyData.dosing_errors.length > 0) {\n  queryParts.push('dosing safety check');\n}\n\nconst finalQuery = queryParts.join(' and ') || $('Webhook - Receive Mobile Request').first().json.body.query;\n\nreturn [{\n  json: {\n    query: finalQuery,\n    hasMajorInteraction: hasMajor,\n    ocrResult: { ocr: ocrData, safety: safetyData },\n    drugNames: $json.drug_names || []\n  }\n}];"
+        "jsCode": "const ocrData = $json.ocr || {};\nconst safetyData = $json.safety || {};\nconst drugNames = ($json.drug_names || []).filter(Boolean).join(' and ');\nconst fallbackQuery = $('Webhook - Receive Mobile Request').first().json.body.query || '';\nconst queryParts = [];\nif (drugNames) queryParts.push(drugNames + ' interaction');\nif (safetyData.dosing_errors && safetyData.dosing_errors.length > 0) queryParts.push('dosing safety check');\nconst finalQuery = queryParts.join(' and ') || fallbackQuery;\nreturn [{ json: { body: { query: finalQuery, mode: 'cloud' } } }];"
       },
       "notes": "Constructs a RAG query string from OCR drug names + safety alerts."
     },
@@ -97,36 +78,17 @@
       "id": "5",
       "name": "PharmaAI RAG Query",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 3,
+      "typeVersion": 4,
       "position": [
         1200,
         300
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/query",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
+        "url": "http://127.0.0.1:8000/query",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "query",
-              "value": "={{ $json.query || $('Webhook - Receive Mobile Request').first().json.body.query }}"
-            },
-            {
-              "name": "mode",
-              "value": "cloud"
-            }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
         "options": {
           "timeout": 60000
         }
@@ -193,7 +155,7 @@
         120
       ],
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_CRITICAL_CHAT_ID }}",
+        "chatId": "945460800",
         "text": "={{ $json.telegram_text }}",
         "additionalFields": {
           "parse_mode": "Markdown",
@@ -212,7 +174,7 @@
         360
       ],
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_STANDARD_CHAT_ID }}",
+        "chatId": "945460800",
         "text": "={{ $json.telegram_text }}",
         "additionalFields": {
           "parse_mode": "Markdown",
