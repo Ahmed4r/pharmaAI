@@ -1,4 +1,4 @@
-﻿import re
+import re
 import streamlit as st
 import streamlit.components.v1 as _st_components
 import time
@@ -224,357 +224,15 @@ header            { display: none !important; }
 
 
 # --- PLACEHOLDER BACKEND CONNECTORS ---
+# --- Backend module imports ---
+from ocr import (
+    preprocess_prescription_image,
+    process_prescription_ocr,
+    analyze_prescription_safety,
+)
+from chatbot import query_ollama_llm
+from drug_lookup import check_drug_interactions, lookup_drug_info
 
-
-def preprocess_prescription_image(image_bytes: bytes) -> bytes:
-    import io as _io, numpy as _np
-    try:
-        import cv2 as _cv2
-        from PIL import Image as _PILImage
-    except ImportError:
-        return image_bytes
-    try:
-        pil = _PILImage.open(_io.BytesIO(image_bytes)).convert('RGB')
-        bgr = _cv2.cvtColor(_np.array(pil), _cv2.COLOR_RGB2BGR)
-        h, w = bgr.shape[:2]
-        if max(h, w) < 1800:
-            scale = 1800 / max(h, w)
-            bgr = _cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=_cv2.INTER_CUBIC)
-        gray = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2GRAY)
-        edges = _cv2.Canny(gray, 50, 150, apertureSize=3)
-        lines = _cv2.HoughLinesP(edges, 1, _np.pi/180, 100, minLineLength=100, maxLineGap=10)
-        if lines is not None and len(lines) > 5:
-            angles = [_np.degrees(_np.arctan2(ln[0][3]-ln[0][1], ln[0][2]-ln[0][0])) for ln in lines]
-            angles = [a for a in angles if abs(a) < 45]
-            if angles:
-                angle = float(_np.median(angles))
-                if abs(angle) > 0.5:
-                    hh, ww = bgr.shape[:2]
-                    M = _cv2.getRotationMatrix2D((ww/2, hh/2), angle, 1.0)
-                    bgr = _cv2.warpAffine(bgr, M, (ww, hh), flags=_cv2.INTER_CUBIC, borderMode=_cv2.BORDER_REPLICATE)
-        lab = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2LAB)
-        l, a, b = _cv2.split(lab)
-        clahe = _cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        bgr = _cv2.cvtColor(_cv2.merge([clahe.apply(l), a, b]), _cv2.COLOR_LAB2BGR)
-        bgr = _cv2.bilateralFilter(bgr, d=9, sigmaColor=75, sigmaSpace=75)
-        blurred = _cv2.GaussianBlur(bgr, (0, 0), sigmaX=2)
-        bgr = _cv2.addWeighted(bgr, 1.5, blurred, -0.5, 0)
-        # Suppress blue/purple circular watermark by filling with white
-        _hsv = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2HSV)
-        _wm_mask = _cv2.inRange(_hsv, _np.array([90, 40, 40]), _np.array([140, 255, 255]))
-        _wm_mask = _cv2.dilate(_wm_mask, _np.ones((5, 5), _np.uint8), iterations=2)
-        bgr[_wm_mask > 0] = [255, 255, 255]
-        buf = _io.BytesIO()
-        _PILImage.fromarray(_cv2.cvtColor(bgr, _cv2.COLOR_BGR2RGB)).save(buf, format='PNG')
-        return buf.getvalue()
-    except Exception:
-        return image_bytes
-
-
-def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png") -> dict:
-    """OCR via Google Gemini 1.5 Flash  native JSON mode, Egyptian prescription specialist."""
-    import json
-    import os as _os
-
-    try:
-        import google.generativeai as _genai
-    except ImportError:
-        return {
-            "status": "error", "raw_json": None, "extracted_text": "",
-            "medications": [], "parsed_meds": [], "patient": "", "date": "",
-            "prescriber": "", "dea": "", "confidence": 0.0,
-            "interactions": [], "preprocessing": [],
-            "error": "google-generativeai not installed  run: pip install google-generativeai",
-        }
-
-    try:
-        api_key = (
-            st.session_state.get("gemini_api_key", "").strip()
-            or _os.environ.get("GEMINI_API_KEY", "")
-            or _os.environ.get("GOOGLE_API_KEY", "")
-        )
-        if not api_key:
-            raise ValueError(
-                "Gemini API key not set. Check your .env file for GEMINI_API_KEY."
-            )
-
-        # For Gemini vision: only upscale if too small  no aggressive CV processing
-        # (CLAHE / bilateral / unsharp / deskew distort the image and hurt accuracy)
-        _pp_steps: list[str] = []
-        try:
-            import io as _io2, numpy as _np2
-            from PIL import Image as _PILImg2
-            import cv2 as _cv2b
-            _pil2 = _PILImg2.open(_io2.BytesIO(image_bytes)).convert("RGB")
-            _h2, _w2 = _pil2.height, _pil2.width
-            if max(_h2, _w2) < 1600:
-                _scale2 = 1600 / max(_h2, _w2)
-                _bgr2 = _cv2b.cvtColor(_np2.array(_pil2), _cv2b.COLOR_RGB2BGR)
-                _bgr2 = _cv2b.resize(_bgr2, None, fx=_scale2, fy=_scale2,
-                                     interpolation=_cv2b.INTER_LANCZOS4)
-                _buf2 = _io2.BytesIO()
-                _PILImg2.fromarray(_cv2b.cvtColor(_bgr2, _cv2b.COLOR_BGR2RGB)).save(_buf2, format="JPEG", quality=95)
-                image_bytes = _buf2.getvalue()
-                _pp_steps = ["Upscale"]
-        except Exception:
-            pass
-
-        # Determine MIME type for Gemini
-        _ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else "jpeg"
-        _mime = "image/jpeg" if _pp_steps else (f"image/jpeg" if _ext in ("jpg", "jpeg") else f"image/{_ext}")
-
-        # Configure Gemini
-        _genai.configure(api_key=api_key)
-        _model = _genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config={
-                "temperature": 0.1,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 4096,
-                "response_mime_type": "application/json",
-            },
-        )
-
-        _prompt = (
-            "You are an expert Egyptian Clinical Pharmacist with years of experience "
-            "reading handwritten Arabic/English prescriptions.\n\n"
-            "TASK: Extract every medication from the prescription image.\n\n"
-            "For each medication extract:\n"
-            "  name: Read every visible character of the drug name carefully. "
-            "If the handwriting trails off, read as far as visible and complete "
-            "the word based on visible strokes (e.g. 'SansoImm'  'Sanso Immune', "
-            "'Lactu'  'Lactulose'). For Arabic names write phonetic English first and "
-            "original Arabic in parentheses.\n"
-            "  dosage: The amount (e.g. '5 ml', '4 drops', '1 sachet', '1 tablet'). "
-            "Look on the SAME LINE and the line immediately following the drug name. "
-            "Arabic amount words like 'خمس سم' = '5 ml', 'قطارة' = '1 drop', "
-            "'كيس' = '1 sachet'. NEVER return null if any amount is visible.\n"
-            "  frequency: All timing/instructions (Arabic or English). Look for words "
-            "like مرة/مرتين/ثلاث, يوميا, قبل/بعد, الافطار/الغداء/العشاء. "
-            "NEVER return null if any instruction is visible.\n"
-            "  uncertain: true only if completely unreadable.\n\n"
-            "COMMON EGYPTIAN PEDIATRIC DRUGS (handwriting key):\n"
-            "  - V-Drop / في-دروب (vitamin drops)\n"
-            "  - Sanso Immune / سانسو إيميون (letters S-a-n-s-o may look run-together)\n"
-            "  - eubion / يوليكون (starts with lowercase e, may look like 'eulicon')\n"
-            "  - Limotal Kids / ليموتال كيدز (L-i-m-o-t-a-l, NOT 'Lunda' or 'Luna')\n"
-            "  - Kidssi Appetite / كيدزي أبيتيت (K-i-d-s-s-i A-p-p-e-t-i-t-e)\n\n"
-            "DOSAGE RULES:\n"
-            "- If a number + unit (سم / ml / drop) appears on the SAME line OR the NEXT line after the drug name, that is the dosage.\n"
-            "- If only a frequency phrase (مرة يوميا, twice daily...) appears with NO volume, set dosage to null and put the phrase in frequency.\n"
-            "- NEVER skip a visible number. '5 سم', 'خمس سم', '1 قطارة' must all be captured.\n\n"
-            "RULES:\n"
-            "- Read ALL lines top to bottom  do not skip any medication.\n"
-            "- Do NOT invent drug names not visible on paper. Complete partial visible names only.\n"
-            "- Ignore rubber stamps, clinic logos, watermarks.\n"
-            "- Return ONLY a single compact JSON line, no newlines inside values.\n\n"
-            "JSON SCHEMA:\n"
-            "{\"patient\":\"string or null\","
-            "\"date\":\"YYYY-MM-DD or null\","
-            "\"prescriber\":\"doctor name + specialty or null\","
-            "\"doctor_specialty\":\"specialty or null\","
-            "\"medications\":[{\"name\":\"string\",\"dosage\":\"string or null\",\"frequency\":\"string or null\",\"uncertain\":false}],"
-            "\"confidence_score\":0.0}"
-        )
-
-        _response = _model.generate_content([
-            _prompt,
-            {"mime_type": _mime, "data": image_bytes},
-        ])
-
-        # Robust JSON extraction: handle fences, truncation, trailing commas
-        _raw = _response.text.strip()
-        parsed = None
-        _errors = []
-
-        # Strategy 1: direct parse
-        try:
-            parsed = json.loads(_raw)
-        except Exception as e1:
-            _errors.append(str(e1))
-
-        # Strategy 2: strip markdown fences then parse
-        if parsed is None:
-            import re as _re
-            _fenced = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", _raw, _re.DOTALL)
-            if _fenced:
-                try:
-                    parsed = json.loads(_fenced.group(1))
-                except Exception as e2:
-                    _errors.append(str(e2))
-
-        # Strategy 3: greedy brace extraction + repair
-        if parsed is None:
-            _start = _raw.find("{")
-            _end = _raw.rfind("}")
-            if _start != -1:
-                _candidate = _raw[_start:(_end + 1 if _end != -1 else len(_raw))]
-                # Remove trailing commas before } or ]
-                _candidate = _re.sub(r",\s*([}\]])", r"\1", _candidate)
-                # If string is still unterminated, close it
-                try:
-                    parsed = json.loads(_candidate)
-                except Exception:
-                    # Try completing truncated JSON
-                    _opens = _candidate.count("{") - _candidate.count("}")
-                    _arr   = _candidate.count("[") - _candidate.count("]")
-                    # close any open string, array, object
-                    if _candidate.rstrip()[-1] not in ('"', '}', ']'):
-                        _candidate += '"'
-                    _candidate += "]" * max(0, _arr) + "}" * max(0, _opens)
-                    try:
-                        parsed = json.loads(_candidate)
-                    except Exception as e3:
-                        _errors.append(str(e3))
-
-        if parsed is None:
-            raise ValueError(f"JSON parse failed after 3 strategies. Raw response snippet: {_raw[:300]!r}. Errors: {_errors}")
-
-
-        medications = parsed.get("medications", [])
-        med_names = [
-            ((m.get("name") or "") + " " + (m.get("dosage") or "")).strip()
-            for m in medications
-        ]
-
-        # Drug interaction check
-        interactions: list = []
-        if med_names and INTERACTION_CHECKER_AVAILABLE:
-            _drug_names = [(m.get("name") or "").split()[0] for m in medications if m.get("name")]
-            interactions = check_interactions(_drug_names)
-
-        # Log to DB
-        try:
-            from database import log_event as _le
-            _le("prescription_scanned", {
-                "drug_count": len(medications),
-                "drugs": med_names,
-                "patient": parsed.get("patient", ""),
-            })
-        except Exception:
-            pass
-
-        return {
-            "status":        "success",
-            "raw_json":      parsed,
-            "extracted_text": (parsed.get("prescriber") or "") + " | " + ", ".join(
-                (m.get("name") or "") for m in medications
-            ),
-            "medications":   med_names,
-            "parsed_meds":   medications,
-            "patient":       parsed.get("patient", "") or "",
-            "date":          parsed.get("date", "") or "",
-            "prescriber":    parsed.get("prescriber", "") or "",
-            "dea":           "",
-            "confidence":    float(parsed.get("confidence_score", 1.0)),
-            "interactions":  interactions,
-            "preprocessing": (_pp_steps + ["Gemini 2.5 Flash Vision", "JSON Mode"]),
-        }
-
-    except Exception as exc:
-        return {
-            "status":        "error",
-            "raw_json":      None,
-            "extracted_text": "",
-            "medications":   [],
-            "parsed_meds":   [],
-            "patient":       "",
-            "date":          "",
-            "prescriber":    "",
-            "dea":           "",
-            "confidence":    0.0,
-            "interactions":  [],
-            "preprocessing": [],
-            "error":         f"OCR failed: {exc}",
-        }
-
-
-def analyze_prescription_safety(parsed_meds: list, patient: str = "",
-                                 prescriber: str = "") -> dict:
-    """Run Groq safety analysis: dosing errors, interactions, frequency alerts.
-    UI labels this as Tesseract.js; backend uses meta-llama/llama-4-scout-17b-16e-instruct.
-    """
-    import json as _json
-    import os as _os
-    try:
-        from groq import Groq as _Groq
-    except ImportError:
-        return {"status": "error", "error": "groq package not installed",
-                "dosing_errors": [], "interactions": [], "frequency_alerts": [], "summary": ""}
-    try:
-        api_key = (
-            st.session_state.get("groq_api_key", "").strip()
-            or _os.environ.get("GROQ_API_KEY", "")
-            or st.secrets.get("GROQ_API_KEY", "")
-        )
-        if not api_key:
-            raise ValueError("Groq API key not set. Check your .env file for GROQ_API_KEY.")
-        meds_text = _json.dumps(parsed_meds, indent=2)
-        prompt = (
-            "You are a clinical pharmacist AI. Analyse the following prescription medications "
-            "for safety issues. Return ONLY a valid JSON object (no markdown, no extra text) "
-            "using this EXACT structure:\n"
-            "{\n"
-            '  \"dosing_errors\": [\n'
-            '    {\"drug\": \"name\", \"prescribed_dose\": \"dose given\", '
-            '\"safe_range\": \"min-max unit\",\n'
-            '     \"severity\": \"major|moderate|minor\", \"recommendation\": \"what to do\"}\n'
-            "  ],\n"
-            '  \"interactions\": [\n'
-            '    {\"drug1\": \"name1\", \"drug2\": \"name2\", \"mechanism\": \"how they interact\",\n'
-            '     \"severity\": \"major|moderate|minor\", \"effect\": \"clinical effect\",\n'
-            '     \"recommendation\": \"action to take\"}\n'
-            "  ],\n"
-            '  \"frequency_alerts\": [\n'
-            '    {\"drug\": \"name\", \"prescribed_frequency\": \"given freq\",\n'
-            '     \"standard_frequency\": \"expected freq\", \"severity\": \"major|moderate|minor\",\n'
-            '     \"recommendation\": \"action to take\"}\n'
-            "  ],\n"
-            '  \"summary\": \"1-2 sentence overall safety summary\"\n'
-            "}\n"
-            f"Prescription medications:\n{meds_text}\n"
-            "Return ONLY the JSON object."
-        )
-        _groq = _Groq(api_key=api_key)
-        completion = _groq.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=2048,
-            top_p=1,
-            stream=False,
-        )
-        raw = completion.choices[0].message.content.strip()
-        _fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        json_str = _fence.group(1) if _fence else raw
-        result = _json.loads(json_str)
-        result.setdefault("dosing_errors", [])
-        result.setdefault("interactions", [])
-        result.setdefault("frequency_alerts", [])
-        result.setdefault("summary", "")
-        try:
-            from database import log_event as _le
-            _total = (len(result["dosing_errors"]) +
-                      len(result["interactions"]) +
-                      len(result["frequency_alerts"]))
-            _le("safety_analysis", {
-                "patient": patient, "drug_count": len(parsed_meds),
-                "errors_found": _total,
-                "has_major": any(
-                    i.get("severity") == "major"
-                    for lst in [result["dosing_errors"],
-                                result["interactions"],
-                                result["frequency_alerts"]]
-                    for i in lst
-                ),
-            })
-        except Exception:
-            pass
-        return {"status": "success", **result}
-    except Exception as exc:
-        return {"status": "error", "error": str(exc),
-                "dosing_errors": [], "interactions": [], "frequency_alerts": [], "summary": ""}
 
 def send_n8n_alert(webhook_url: str, payload: dict) -> bool:
     """POST a safety-alert payload to an n8n webhook. Returns True on 2xx/3xx."""
@@ -586,520 +244,6 @@ def send_n8n_alert(webhook_url: str, payload: dict) -> bool:
         return False
 
 
-def _get_ram_warning(exc: Exception, host: str) -> str:
-    """Return an actionable error message for Ollama/BioMistral failures."""
-    msg = str(exc)
-    free_gb = 0.0
-    try:
-        import psutil
-        free_gb = round(psutil.virtual_memory().available / 1073741824, 1)
-    except Exception:
-        pass
-    needed_gb = 4.5
-    ram_line = (
-        f"**Free RAM:** {free_gb} GB available / ~{needed_gb} GB required.\n\n"
-        if free_gb > 0 else ""
-    )
-    if "system memory" in msg or "allocate" in msg or free_gb < needed_gb:
-        return (
-            "**⚠️ BioMistral cannot load – not enough free RAM**\n\n"
-            + ram_line
-            + "**To free RAM, close any of these:**\n"
-            "- Browser tabs (Edge/Chrome/Brave)\n"
-            "- VS Code extensions (disable unused ones)\n"
-            "- Other background applications\n\n"
-            "After closing apps, wait 10 seconds then send your message again.\n\n"
-            f"_Technical: {msg}_"
-        )
-    return (
-        f"**BioMistral offline** – could not reach Ollama at {host}\n\n"
-        f"Error: {msg}\n\n"
-        "Make sure Ollama is running (ollama serve) and the model is available."
-    )
-
-
-def query_ollama_llm(user_message: str, chat_history: list) -> str:
-    """BioMistral 7B via Ollama - clinical pharmacist analysis."""
-    import ollama as _ollama
-    import re as _re
-    import streamlit as st
-
-    # 1. Query expansion
-    _SPELL = {
-        "ckd":  "chronic kidney disease",
-        "inr":  "warfarin monitoring",
-        "renal": "kidney impairment",
-        "dm":   "diabetes mellitus",
-        "htn":  "hypertension",
-        "afib": "atrial fibrillation",
-    }
-    _msg = user_message
-    for _abbr, _full in _SPELL.items():
-        _msg = _re.sub(r"\b" + _abbr + r"\b", _full, _msg, flags=_re.IGNORECASE)
-
-    # 2. Detect clinical + intent flags
-    _CLINICAL_RE = _re.compile(
-        r"\b(mg|mcg|tablet|capsule|dose|drug|medication|medicine|prescription|"
-        r"interaction|warfarin|metformin|aspirin|amoxicillin|ibuprofen|omeprazole|"
-        r"renal|hepat|cardiac|diabetes|hypertens|antibiotic|antihypertens|"
-        r"pharmacok|pharmacodyn|cyp[0-9]|inhibit|induc|patient|side.?effect|"
-        r"contraindic|overdose|toxicity|mechanism|serotonin|bleeding|coumadin)\b",
-        _re.IGNORECASE,
-    )
-    _is_clinical = bool(_CLINICAL_RE.search(_msg)) or len(_msg.split()) >= 6
-
-    _DOSING_RE = _re.compile(
-        r"\b(dose|dosing|dosage|mg|mcg|mg/kg|frequency|how much|how many|"
-        r"renal.{0,20}fail|renal.{0,20}impair|kidney.{0,20}fail|crcl|"
-        r"creatinine.{0,20}clearance|dose.{0,10}adjust|adjust|reduce)\b",
-        _re.IGNORECASE,
-    )
-    _is_dosing_query   = bool(_DOSING_RE.search(_msg))
-    _needs_renal_check = bool(_re.search(
-        r"\b(renal.{0,20}fail|kidney.{0,20}fail|renal.{0,20}impair|crcl|ckd)\b",
-        _msg, _re.IGNORECASE,
-    ))
-
-    # 3. RAG retrieval - targeted, cross-contamination-resistant
-    _rag_block = ""
-    rag_chunks: list = []
-    _query_drugs: list[str] = []
-    _context_drug_match = True   # strict RAG guardrail: context must mention queried drugs
-    _confidence_pct = 0          # 0-100 RAG relevance score
-    _low_confidence = False      # True when confidence < 80%
-
-    if _is_clinical and RAG_ENGINE_AVAILABLE:
-        try:
-            # 3a. Identify drugs in the query
-            _query_drugs = extract_drug_names(_msg)
-
-            if _query_drugs:
-                if not _is_dosing_query:
-                    # Interaction query: verified drug-name retrieval
-                    rag_chunks = retrieve_interaction(_query_drugs, n_results=5)
-                else:
-                    # Dosing query: wider pool to catch Dosing/Adjustment sections
-                    _dose_query = (
-                        " ".join(_query_drugs)
-                        + " dose dosing renal adjustment CrCl creatinine clearance mg/kg"
-                    )
-                    rag_chunks = retrieve(_dose_query, n_results=8)
-            else:
-                _general_query = f"{_msg} renal dose adjustment creatinine clearance"
-                rag_chunks = retrieve(_general_query, n_results=5)
-
-            # 3c. Minimum relevance filter
-            scored_chunks = [c for c in rag_chunks if c.get("score", 0) >= 0.35]
-
-            # 3d. Context reranking: push Dosing/Adjustment sections to the top
-            if _is_dosing_query and scored_chunks:
-                _DOSE_CATS = {"dosing", "dose", "adjustment", "dose_adjustment", "renal_dosing"}
-                def _dose_priority(c):
-                    cat  = c.get("category", "").lower().replace(" ", "_")
-                    text = c.get("text", "").lower()
-                    top  = any(k in cat for k in _DOSE_CATS) or any(
-                        k in text for k in ("crcl", "creatinine clearance", "mg/kg", "dose adjustment")
-                    )
-                    return (0 if top else 1, -c.get("score", 0.0))
-                scored_chunks.sort(key=_dose_priority)
-
-            # 3e. Renal CrCl validation
-            _renal_data_found = False
-            if _needs_renal_check and scored_chunks:
-                _renal_data_found = any(
-                    "crcl" in c.get("text", "").lower()
-                    or "creatinine clearance" in c.get("text", "").lower()
-                    for c in scored_chunks
-                )
-
-            # 3f. Build reference block (category label included)
-            if scored_chunks:
-                drug_label = (
-                    " + ".join(d.title() for d in _query_drugs)
-                    if _query_drugs else "General"
-                )
-                _refs = [
-                    "[{drug}] [{cat}] (Relevance: {score:.2f})\n{text}".format(
-                        drug=c.get("drug", "Unknown").upper(),
-                        cat=c.get("category", "general").upper(),
-                        score=c.get("score", 0),
-                        text=c["text"],
-                    )
-                    for c in scored_chunks
-                ]
-                _rag_block = (
-                    f"\n\nVERIFIED CLINICAL REFERENCES [{drug_label}]:\n"
-                    + "\n\n".join(_refs)
-                )
-            elif _query_drugs:
-                _rag_block = (
-                    f"\n\n[KNOWLEDGE BASE NOTE: No verified data found"
-                    f" for {', '.join(_query_drugs)} in current database.]"
-                )
-
-            # 3g. Safety guardrail: warn LLM if renal CrCl data is absent
-            if _needs_renal_check and not _renal_data_found:
-                _rag_block += (
-                    "\n\n[RENAL VALIDATION NOTE: The retrieved context does NOT contain "
-                    "explicit CrCl thresholds. You MUST NOT invent creatinine clearance "
-                    "cutoffs. State 'CrCl-based dosing data not available in knowledge "
-                    "base' instead.]"
-                )
-
-            # 3h. Strict drug-name matching guardrail
-            if _query_drugs:
-                if not scored_chunks:
-                    _context_drug_match = False
-                else:
-                    _match_pats = [
-                        _re.compile(r"\b" + _re.escape(d) + r"\b", _re.IGNORECASE)
-                        for d in _query_drugs
-                    ]
-                    _matched_chunks = [
-                        c for c in scored_chunks
-                        if any(p.search(c.get("text", "") + " " + c.get("drug", ""))
-                               for p in _match_pats)
-                    ]
-                    _context_drug_match = bool(_matched_chunks)
-
-            # 3i. Confidence score (average relevance of retrieved context)
-            if scored_chunks:
-                _avg_rag_score = (
-                    sum(c.get("score", 0.0) for c in scored_chunks)
-                    / len(scored_chunks)
-                )
-                _confidence_pct = min(100, max(0, int(_avg_rag_score * 160)))
-            _low_confidence = bool(_query_drugs) and _confidence_pct < 80
-
-        except Exception as _re_err:
-            print(f"RAG error: {_re_err}")
-
-    # 3j. Context mismatch: refuse answer if no chunk mentions queried drugs
-    if not _context_drug_match and _query_drugs:
-        _queried_str = ", ".join(d.title() for d in _query_drugs)
-        return (
-            f"\u26a0\ufe0f **Context Mismatch \u2014 Cannot Answer Reliably**\n\n"
-            f"The knowledge base does not contain verified information about "
-            f"**{_queried_str}** that matches your query.\n\n"
-            f"**Please consult a physical clinical reference:**\n"
-            f"- British National Formulary (BNF)\n"
-            f"- ASHP Drug Information\n"
-            f"- The drug\u2019s official Summary of Product Characteristics (SmPC)"
-        )
-
-    _MODEL = "adrienbrault/biomistral-7b:Q4_K_M"
-    _HOST  = st.session_state.get("ol_host", "http://localhost:11434")
-
-    # 4. Intent-aware system prompt
-    _drug_scope = (
-        f"Drugs under analysis: {', '.join(d.upper() for d in _query_drugs)}.\n"
-        if _query_drugs else ""
-    )
-
-    if _is_clinical and _is_dosing_query:
-        # DOSING MODE: scan context for explicit CrCl/mL/min values to surface upfront
-        import re as _re2
-        _EXTRACT_RE = _re2.compile(
-            r"[^.\n]*(?:crcl|ml/min|creatinine clearance|dose adjustment|adjust(?:ed)? dose)"
-            r"[^.\n]*",
-            _re2.IGNORECASE,
-        )
-        _extracted_lines: list[str] = []
-        for _ec in (scored_chunks if "scored_chunks" in dir() else []):
-            for _hit in _EXTRACT_RE.findall(_ec.get("text", "")):
-                _hit = _hit.strip()
-                if _hit and _hit not in _extracted_lines:
-                    _extracted_lines.append(_hit)
-        _extracted_block = ""
-        if _extracted_lines:
-            _extracted_block = (
-                "\n\nEXTRACTED DOSING VALUES (use these to start your answer):\n"
-                + "\n".join(f"   {l}" for l in _extracted_lines[:8])
-            )
-
-        _renal_example = (
-            "Your answer MUST start with a line in this exact format:\n"
-            "  **For renal impairment (CrCl < X mL/min), the dose is: [DOSE]**\n"
-            "Replace X and [DOSE] with the values found in the references.\n"
-            "If multiple CrCl thresholds exist, list each as a separate bullet.\n"
-            if _needs_renal_check else ""
-        )
-
-        _SYS = (
-            "You are a precise Clinical Pharmacist. "
-            "Your answer must START with the specific dose found in the sources.\n\n"
-            + _drug_scope
-            + _renal_example
-            + "EXTRACTION RULES:\n"
-            "1. Scan the references for the keywords CrCl, mL/min, Adjustment, mg/kg, "
-            "   or any explicit dosage number.\n"
-            "2. PRIORITISE sections labelled DOSING or ADJUSTMENT over general overview.\n"
-            "3. Format every dosage value in **bold markdown** so it stands out.\n"
-            "4. Use bullet points (-) for each dose tier / CrCl range.\n"
-            "5. Do NOT provide general mechanism or pharmacology unless the specific "
-            "   dose is completely absent from the references.\n"
-            "6. If the exact dose is missing say: '**Exact dosing data not available "
-            "   in knowledge base.** Consult current BNF/ASHP guidelines.'\n"
-            "7. End with: [Verify with a licensed pharmacist before clinical use]\n"
-        ) + _rag_block + _extracted_block
-
-    elif _is_clinical:
-        # INTERACTION / GENERAL CLINICAL MODE
-        # Pre-check structured interaction DB for severity + known facts
-        _ix_data: dict | None = None
-        _is_major = False
-        _timing_rule_drugs = {"ibuprofen", "naproxen"}  # drugs where 30-min rule applies
-        _warfarin_in_query = "warfarin" in _query_drugs or "coumadin" in _msg.lower()
-        _exclude_timing_note = ""
-        if _query_drugs and INTERACTION_CHECKER_AVAILABLE:
-            try:
-                _ixs = check_interactions(_query_drugs)
-                if _ixs:
-                    _ix_data = _ixs[0]
-                    _is_major = _ix_data.get("severity", "") == "major"
-            except Exception:
-                pass
-        # If warfarin is involved, explicitly ban the 30-min COX-1 timing rule
-        if _warfarin_in_query and not (_timing_rule_drugs & set(_query_drugs)):
-            _exclude_timing_note = (
-                "CRITICAL OVERRIDE: The '30-minute timing rule' applies ONLY to "
-                "Aspirin + Ibuprofen (COX-1 competition). It does NOT apply to Warfarin. "
-                "Do NOT mention any timing rule in the context of Warfarin. "
-                "Warfarin interactions involve ANTICOAGULATION and BLEEDING RISK, not enzyme competition.\n\n"
-            )
-        # Build pre-synthesised warning block from structured DB data
-        _db_warning = ""
-        if _ix_data and _is_major:
-            _d1 = _ix_data.get("drug1", "").title()
-            _d2 = _ix_data.get("drug2", "").title()
-            _mech  = _ix_data.get("mechanism", "")
-            _desc  = _ix_data.get("description", "")
-            _action = _ix_data.get("action", "")
-            _db_warning = (
-                f"\nVERIFIED INTERACTION DATABASE ENTRY:\n"
-                f"  Pair: {_d1} + {_d2}  |  Severity: MAJOR\n"
-                f"  Mechanism: {_mech}\n"
-                f"  Clinical summary: {_desc}\n"
-                f"  Recommended action: {_action}\n"
-            )
-        _SYS = (
-            "You are a Senior Clinical Pharmacist writing a structured drug interaction report.\n\n"
-            + _drug_scope
-            + _exclude_timing_note
-            + "OUTPUT FORMAT  follow this structure exactly:\n\n"
-            "** MAJOR INTERACTION DETECTED** (or MODERATE/MINOR as appropriate)\n"
-            "**Drugs:** [Drug A] + [Drug B]\n\n"
-            "**Mechanism:**\n"
-            "Explain each drug's pathway separately  do NOT merge them.\n"
-            "Antiplatelet effects (COX-1 inhibition) are DIFFERENT from anticoagulation "
-            "(Vitamin K antagonism). State which pathway each drug uses.\n\n"
-            "**Clinical Consequence:**\n"
-            "Describe the combined effect and the specific risk (e.g., additive bleeding risk).\n\n"
-            "**Monitoring:**\n"
-            "- State specific lab tests (e.g., INR, CBC, renal function)\n"
-            "- State monitoring frequency (e.g., 'check INR weekly')\n"
-            "- State clinical signs to watch (e.g., bruising, dark/tarry stools, prolonged bleeding)\n\n"
-            "**Clinical Recommendation:**\n"
-            "State the action clearly (avoid / use with caution / dose adjustment / alternative).\n\n"
-            "STRICT RULES:\n"
-            "1. Base your answer on the verified references AND the database entry provided.\n"
-            "2. Ignore any reference about a DIFFERENT drug pair  do NOT transfer its rules.\n"
-            "3. NEVER invent INR thresholds, timing rules, or dose values not in the sources.\n"
-            "4. End with: [Verify with a licensed pharmacist before any clinical decision]\n"
-        ) + _db_warning + _rag_block
-
-    else:
-        _SYS = "You are a helpful Clinical Pharmacist AI assistant. Respond politely and concisely."
-
-    # 5. Build prompt - intent-aware instruction
-    if _is_clinical and _is_dosing_query:
-        full_prompt = (
-            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
-            f"Dosing question: {_msg}\n\n"
-            "TASK: Extract ALL dosage values, CrCl thresholds, and mL/min cutoffs "
-            "directly from the references above. Format each value in **bold**. "
-            "Start your answer immediately with the dose  no introduction needed.\n"
-            "[/INST]"
-        )
-    elif _is_clinical:
-        _major_task = (
-            "TASK: Write the full structured interaction report in the exact format "
-            "specified in the system prompt. Start immediately with "
-            "'**⚠️ MAJOR INTERACTION DETECTED**'. "
-            "Bold all drug names and severity labels. "
-            "Under Monitoring, explicitly list: INR frequency, bleeding signs "
-            "(bruising, dark stools, prolonged bleeding time). "
-            "Do NOT mention COX-1 timing rules unless both drugs are NSAIDs.\n"
-            if _is_major else
-            "Provide a structured pharmacist safety review in the format specified. "
-            "Bold all severity labels and drug names.\n"
-        )
-        full_prompt = (
-            f"<s>[INST] <<SYS>>\n{_SYS}\n<</SYS>>\n\n"
-            f"Clinical question: {_msg}\n\n"
-            + _major_task
-            + "[/INST]"
-        )
-    else:
-        full_prompt = f"<s>[INST] {_msg} [/INST]"
-
-    # 6. Generate
-    try:
-        client = _ollama.Client(host=_HOST)
-        resp = client.generate(
-            model=_MODEL,
-            prompt=full_prompt,
-            raw=True,
-            options={
-                "num_predict": 1500,
-                "temperature": 0.3,
-                "top_p":       0.9,
-                "num_ctx":     2048,
-                "num_gpu":     0,
-            },
-        )
-
-        answer = resp.response.strip()
-
-        for _marker in ("<<SYS>>", "<</SYS>>", "[INST]", "[/INST]", "<s>", "</s>"):
-            answer = answer.replace(_marker, "")
-        answer = answer.strip()
-
-        if len(answer) < 15:
-            return "\u26a0\ufe0f \u0644\u0645 \u064a\u0635\u062f\u0631 \u0627\u0644\u0645\u0648\u062f\u064a\u0644 \u0631\u062f\u0651\u0627\u064b. \u062d\u0627\u0648\u0644 \u0625\u0639\u0627\u062f\u0629 \u0635\u064a\u0627\u063a\u0629 \u0627\u0644\u0633\u0624\u0627\u0644."
-
-        # Add source citations for high-confidence chunks
-        scored = [c for c in rag_chunks if c.get("score", 0) >= 0.45]
-        if scored:
-            from rag_engine import format_citations
-            answer += f"\n\n---\n{format_citations(scored)}"
-
-        # Confidence warning appended when RAG relevance < 80%
-        if _low_confidence and _confidence_pct > 0:
-            answer += (
-                f"\n\n---\n"
-                f"\u26a0\ufe0f **RAG Confidence: {_confidence_pct}% "
-                f"(Below 80% threshold)**\n"
-                f"This response is based on limited or low-relevance context data. "
-                f"**Please verify with a physical clinical reference** "
-                f"(BNF, ASHP Drug Information, or official prescribing information) "
-                f"before making any clinical decisions."
-            )
-
-        try:
-            from database import log_event as _le
-            _le("query_answered", {"query": user_message[:200]})
-        except Exception:
-            pass
-
-        return answer
-
-    except Exception as exc:
-        return _get_ram_warning(exc, _HOST)
-
-
-
-def check_drug_interactions(drug_list: list) -> list:
-    """Query RxNav REST API for real drug-drug interactions."""
-    import requests as _req
-
-    if len(drug_list) < 2:
-        return []
-
-    # Step 1: resolve each drug name to an RxCUI
-    cuis = []
-    for drug in drug_list:
-        name = drug.split()[0] if drug else ""
-        try:
-            r = _req.get(
-                "https://rxnav.nlm.nih.gov/REST/rxcui.json",
-                params={"name": name, "search": "2"},
-                timeout=6,
-            )
-            rxnorm_ids = r.json().get("idGroup", {}).get("rxnormId", [])
-            if rxnorm_ids:
-                cuis.append(rxnorm_ids[0])
-        except Exception:
-            continue
-
-    if len(cuis) < 2:
-        return []
-
-    # Step 2: query interaction list for all resolved CUIs
-    results = []
-    try:
-        r = _req.get(
-            "https://rxnav.nlm.nih.gov/REST/interaction/list.json",
-            params={"rxcuis": " ".join(cuis)},
-            timeout=10,
-        )
-        groups = r.json().get("fullInteractionTypeGroup", [])
-        SEV_MAP = {
-            "high": "major", "critical": "major",
-            "moderate": "moderate",
-            "low": "minor", "minor": "minor",
-        }
-        for group in groups:
-            for itype in group.get("fullInteractionType", []):
-                for pair in itype.get("interactionPair", []):
-                    concepts = pair.get("interactionConcept", [])
-                    if len(concepts) < 2:
-                        continue
-                    raw_sev = (pair.get("severity") or "unknown").strip().lower()
-                    results.append({
-                        "drug_a":      concepts[0]["minConceptItem"]["name"],
-                        "drug_b":      concepts[1]["minConceptItem"]["name"],
-                        "severity":    SEV_MAP.get(raw_sev, raw_sev),
-                        "description": pair.get("description", "No details available."),
-                    })
-    except Exception:
-        pass
-
-    return results
-
-
-def lookup_drug_info(drug_name: str) -> dict:
-    """Fetch drug profile from SQLite DB (drug_db); falls back to empty stub."""
-    try:
-        from drug_db import get_drug_info as _dbi
-        d = _dbi(drug_name)
-        if not d.get("error"):
-            dr = d.get("dosing_rule") or {}
-            if dr:
-                mn  = dr.get("min_dose", "")
-                mx  = dr.get("max_dose", "")
-                u   = dr.get("unit", "mg")
-                frq = dr.get("frequency", "")
-                dosage = f"{mn}-{mx} {u} {frq}".strip("- ")
-                renal  = dr.get("renal_adjustment") or ""
-            else:
-                dosage, renal = "", ""
-            return {
-                "generic_name":       d.get("generic_name", drug_name),
-                "brand_names":        d.get("brand_names") or [],
-                "drug_class":         d.get("drug_class", ""),
-                "mechanism":          d.get("mechanism", ""),
-                "indications":        d.get("indications") or [],
-                "contraindications":  d.get("contraindications") or [],
-                "side_effects":       d.get("side_effects") or [],
-                "dosage":             dosage,
-                "pregnancy_category": d.get("pregnancy_cat", ""),
-                "renal_adjustment":   renal,
-            }
-    except Exception:
-        pass
-    return {
-        "generic_name":       drug_name,
-        "brand_names":        [],
-        "drug_class":         "Not found in database",
-        "mechanism":          "Drug not found. Check spelling or ensure it is in the database.",
-        "indications":        [],
-        "contraindications":  [],
-        "side_effects":       [],
-        "dosage":             "",
-        "pregnancy_category": "",
-        "renal_adjustment":   "",
-    }
 
 # --- SESSION STATE ---
 
@@ -1233,7 +377,7 @@ with st.sidebar:
 
 
 # --- GLOBAL LEFT DRAWER (injected via window.parent) ---
-_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\'],\  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
+_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\']\n  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
 
 
 # --- PAGE: DASHBOARD ---
@@ -1476,6 +620,37 @@ elif active_page == "Prescription Scanner":
                     return re.sub(r"\s*\(uncertain\)\s*", "", val or "",
                                   flags=re.IGNORECASE).strip()
 
+                # ── Confidence Dashboard ──────────
+                _ocr_conf  = int(round(ocr.get("confidence", 0.5) * 100))
+                _drug_conf = int(round(ocr.get("drug_match_confidence", 0.80) * 100))
+                _ix_conf   = int(round(ocr.get("interaction_confidence", 0.88) * 100))
+                def _cbar(pct, label, sub=""):
+                    c = "#388E3C" if pct >= 80 else "#F9A825" if pct >= 60 else "#C62828"
+                    filled = min(20, int(pct / 5))
+                    bar = "█" * filled + "░" * (20 - filled)
+                    return (
+                        "<div style='margin-bottom:.5rem;'>"
+                        "<div style='display:flex;justify-content:space-between;margin-bottom:.1rem;'>"
+                        f"<span style='font-size:.8rem;font-weight:600;color:#0B3C5D;'>{label}</span>"
+                        f"<span style='font-size:.8rem;font-weight:700;color:{c};'>{pct}%</span>"
+                        "</div>"
+                        f"<div style='font-family:monospace;font-size:.72rem;color:{c};'>{bar}</div>"
+                        + (f"<div style='font-size:.68rem;color:#6B8CAE;margin-top:.05rem;'>{sub}</div>" if sub else "")
+                        + "</div>"
+                    )
+                st.markdown(
+                    "<div style='background:#fff;border-radius:10px;padding:.9rem 1.1rem;"
+                    "box-shadow:0 2px 10px rgba(11,60,93,.07);margin-bottom:.9rem;"
+                    "border-left:4px solid #1A6B8A;'>"
+                    "<div style='font-size:.85rem;font-weight:700;color:#0B3C5D;margin-bottom:.6rem;'>"
+                    "&#128202; Confidence Report</div>"
+                    + _cbar(_ocr_conf,  "OCR Confidence",        "Gemini Vision quality score")
+                    + _cbar(_drug_conf, "Drug Name Match",       "Brand → Generic normalization")
+                    + _cbar(_ix_conf,   "Interaction Reliability","Evidence-source quality")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
                 #  AI disclaimer banner 
                 st.markdown(
                     "<div style='background:#FFF8E1;border:1.5px solid #F9A825;"
@@ -1531,11 +706,23 @@ elif active_page == "Prescription Scanner":
                         "font-weight:700;'>&#9888; Uncertain</span>"
                         if _has_unc else ""
                     )
+                    _gen_name = (_med.get("generic_name") or "").strip()
+                    _gen_mtype = (_med.get("name_match_type") or "not_found")
+                    _gen_conf = _med.get("name_confidence", 0.0)
+                    _generic_badge = ""
+                    if _gen_name and _gen_name.lower() != _name.lower() and _gen_mtype != "not_found":
+                        _gc = "#388E3C" if _gen_conf >= 0.80 else "#F9A825"
+                        _generic_badge = (
+                            f" <span style='background:#E8F5E9;color:{_gc};"
+                            f"padding:1px 8px;border-radius:20px;font-size:.7rem;"
+                            f"font-weight:600;border:1px solid {_gc};white-space:nowrap;'>"
+                            f"&#10132; {_gen_name}</span>"
+                        )
                     st.markdown(
                         f"<div style='border:1.5px solid {_border};border-radius:10px;"
                         f"padding:.7rem 1rem .3rem 1rem;margin-bottom:.4rem;background:#FAFCFF;'>"
                         f"<span style='font-weight:700;color:#0B3C5D;font-size:.9rem;'>"
-                        f"&#128138; Medication {_mi + 1}{_unc_badge}</span>"
+                        f"&#128138; Medication {_mi + 1}{_unc_badge}{_generic_badge}</span>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -1698,7 +885,9 @@ elif active_page == "Prescription Scanner":
                                         "</span><br>"
                                         "<span style='font-size:.83rem;color:#555;'>"
                                         f"&#128161; {_fi.get('recommendation', '')}"
-                                        "</span></div>",
+                                        "</span>"
+                                        + (f"<br><span style='font-size:.8rem;color:#1A6B8A;padding-top:.2rem;display:inline-block;'>&#127859; Meal timing: {_fi.get('meal_timing', '')}</span>" if _fi.get('meal_timing') else "")
+                                        + "</div>",
                                         unsafe_allow_html=True,
                                     )
                             else:

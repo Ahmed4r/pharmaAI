@@ -135,6 +135,36 @@ def _normalise(name: str) -> str:
     return _SYNONYMS.get(n.strip(), n.strip())
 
 
+def _query_openfda(drug_a: str, drug_b: str) -> list:
+    """Query OpenFDA drug label API for known interactions."""
+    import urllib.request as _ur, urllib.parse as _up, json as _js
+    results = []
+    try:
+        url = (
+            "https://api.fda.gov/drug/label.json?"
+            + _up.urlencode({"search": 'openfda.generic_name:"' + drug_a + '"', "limit": "1"})
+        )
+        req = _ur.Request(url, headers={"User-Agent": "pharmaAI/1.0"})
+        with _ur.urlopen(req, timeout=4) as resp:
+            data = _js.loads(resp.read().decode())
+        label = data.get("results", [{}])[0]
+        di_text = " ".join(label.get("drug_interactions", [])).lower()
+        needle = drug_b.split()[0]
+        if len(needle) >= 4 and needle in di_text:
+            results.append({
+                "drug1": drug_a, "drug2": drug_b,
+                "severity": "moderate",
+                "mechanism": "Reported in FDA drug label interactions section.",
+                "description": drug_a.title() + " \u2194 " + drug_b.title() + ": Interaction noted in FDA drug label. Verify clinical significance.",
+                "action": "Review full FDA label for detailed guidance.",
+                "source": "openfda",
+                "interaction_confidence": 0.72,
+            })
+    except Exception:
+        pass
+    return results
+
+
 def check_interactions(drug_list: list[str]) -> list[dict]:
     """Return all known interactions between drugs in drug_list, sorted major-first."""
     normalised = list(dict.fromkeys(_normalise(d) for d in drug_list if d and d.strip()))
@@ -161,7 +191,10 @@ def check_interactions(drug_list: list[str]) -> list[dict]:
                 row = cur.fetchone()
                 if row:
                     seen.add(pair)
-                    found.append(dict(row))
+                    _r = dict(row)
+                    _r.setdefault("source", "sqlite")
+                    _r.setdefault("interaction_confidence", 0.88)
+                    found.append(_r)
         conn.close()
         if found:
             return _sort(found)
@@ -178,8 +211,22 @@ def check_interactions(drug_list: list[str]) -> list[dict]:
             for ix in _BUILTIN:
                 if frozenset([ix["drug1"], ix["drug2"]]) == pair:
                     seen.add(pair)
-                    found.append(ix.copy())
+                    _ix2 = ix.copy()
+                    _ix2.setdefault("source", "builtin")
+                    _ix2.setdefault("interaction_confidence", 0.92)
+                    found.append(_ix2)
                     break
+    # Tier 3: OpenFDA
+    _of_seen: set = set()
+    for _i2 in range(len(normalised)):
+        for _j2 in range(_i2 + 1, len(normalised)):
+            _pa, _pb = normalised[_i2], normalised[_j2]
+            _fp: frozenset = frozenset([_pa, _pb])
+            if _fp not in seen and _fp not in _of_seen:
+                _of_seen.add(_fp)
+                for _of in _query_openfda(_pa, _pb):
+                    seen.add(_fp)
+                    found.append(_of)
     return _sort(found)
 
 
@@ -204,6 +251,21 @@ def format_interaction_alert(interaction: dict) -> str:
     }
     cls, badge, icon = _CFG.get(sev, _CFG["minor"])
 
+    _SRC_CFG = {
+        "sqlite":  ("#E3F2FD", "#1565C0", "&#128197; Local DB"),
+        "builtin": ("#EDE7F6", "#4527A0", "&#128218; Evidence Base"),
+        "openfda": ("#F3E5F5", "#6A1B9A", "&#128279; OpenFDA"),
+    }
+    _src = interaction.get("source", "builtin")
+    _src_bg, _src_col, _src_lbl = _SRC_CFG.get(_src, _SRC_CFG["builtin"])
+    _ix_conf = interaction.get("interaction_confidence", 0.88)
+    _src_badge = (
+        f"<span style='background:{_src_bg};color:{_src_col};"
+        f"padding:1px 7px;border-radius:20px;font-size:.68rem;"
+        f"font-weight:600;border:1px solid {_src_col};margin-left:auto;'>"
+        f"{_src_lbl}&nbsp;{int(round(_ix_conf*100))}%</span>"
+    )
+
     mech_html = (
         f"<div style='font-size:.8rem;color:#555;margin-top:.3rem;'>"
         f"<strong>Mechanism:</strong> {mechanism}</div>"
@@ -217,9 +279,9 @@ def format_interaction_alert(interaction: dict) -> str:
 
     return (
         f"<div class='custom-alert {cls}' style='margin:.4rem 0;'>"
-        f"<div style='display:flex;align-items:center;gap:.5rem;'>"
+        f"<div style='display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;'>"
         f"{icon}&nbsp;<span class='sev-badge {badge}'>{sev.upper()}</span>"
-        f"&ensp;<strong>{d1}</strong>&nbsp;&harr;&nbsp;<strong>{d2}</strong></div>"
+        f"&ensp;<strong>{d1}</strong>&nbsp;&harr;&nbsp;<strong>{d2}</strong>{_src_badge}</div>"
         f"<div style='margin-top:.35rem;font-size:.88rem;'>{desc}</div>"
         f"{mech_html}{action_html}"
         f"</div>"

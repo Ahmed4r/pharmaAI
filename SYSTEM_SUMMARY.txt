@@ -1,0 +1,352 @@
+=========================================================
+  pharmaAI  SYSTEM ARCHITECTURE & PROGRESS SUMMARY
+  Date: March 11, 2026
+  Repo: Ahmed4r/pharmaAI  |  Branch: main
+=========================================================
+
+
+SECTION 1  EXISTING SYSTEM (BEFORE THIS SESSION)
+
+
+1. OCR Pipeline (ocr.py)
+   Image  preprocess_prescription_image() (OpenCV)
+         - Upscale if < 1600px
+         - Deskew via Hough Lines
+         - CLAHE contrast (clipLimit=2.0, tileGridSize=8x8)
+         - Bilateral Filter de-noise
+         - Unsharp Mask sharpening
+         - Blue circular stamp removal (HSV mask)
+    process_prescription_ocr() (Gemini 2.5 Flash Vision)
+         - model: gemini-2.5-flash
+         - temperature: 0.1
+         - response_mime_type: application/json
+         - Specialist Egyptian/Arabic-English prompt
+         - Understands "slash notation": 1/8 = every 8 hours
+         - Returns: patient, prescriber, medications list,
+           confidence_score, interactions
+    analyze_prescription_safety() (Groq llama-4-scout)
+         - Dosing error detection
+         - Drug interaction warnings
+         - Frequency alerts with meal timing
+
+   NOTE: OCR is NOT Tesseract or EasyOCR  it is Gemini Vision
+         directly producing structured JSON output.
+
+2. LLM Chat (chatbot.py)
+   - BioMistral 7B running locally via Ollama
+   - URL: http://localhost:11434
+   - Default model: adrienbrault/biomistral-7b:Q4_K_M
+   - Overridable via PHARMA_MODEL env variable
+   - Chat format: Llama2 ChatML
+     <s>[INST] <<SYS>>
+     {system_prompt + RAG_context}
+     <</SYS>>
+     Clinical question: {user_message}
+     [/INST]
+   - Pre-LLM processing:
+     - Abbreviation expansion: CKD -> chronic kidney disease
+     - Clinical question detection (drug name regex)
+     - RAG retrieval if clinical
+
+3. RAG System (rag_engine.py)  PRESENT & WORKING
+   knowledge_base/drugs.json
+     -> _index_documents()
+     -> Embeddings (priority):
+          1. nomic-embed-text via Ollama
+          2. ONNX all-MiniLM-L6 (fallback if Ollama offline)
+     -> ChromaDB (local persistent at knowledge_base/chroma_db/)
+   
+   Query flow:
+     query -> _expand_query() [brand->generic: plavix->clopidogrel]
+           -> retrieve() [cosine similarity >= 0.35]
+           -> TF-IDF fallback if Ollama offline
+           -> chunks injected as "VERIFIED CLINICAL REFERENCES"
+           -> BioMistral
+
+4. Key Files (Pre-Session)
+   File                 Purpose
+   
+   app.py               Main Streamlit UI (~57KB, 900+ lines)
+   ocr.py               Gemini OCR + Groq safety analysis
+   chatbot.py           BioMistral LLM chat + RAG integration
+   rag_engine.py        ChromaDB vector search + TF-IDF fallback
+   interaction_checker.py  Drug-drug interaction database
+   drug_db.py           SQLite + JSON drug info lookup
+   drug_lookup.py       RxNorm API integration
+   database.py          SQLite schema (pharma.db)
+   knowledge_base/      drugs.json, brand_map.json, chroma_db/
+
+
+SECTION 2  CHANGES MADE IN PREVIOUS SESSION
+
+
+Prompt upgrades: "Clinical Pharmacologist" 4-Step Framework
+
+A) ocr.py  Gemini OCR Prompt Upgraded
+   The Gemini JSON output now includes additional fields:
+   - diagnosis_context   : extracted diagnosis/specialty
+   - slash_notation_used : true/false (1/8 detection)
+   - dose_interpretation : human-readable dose text
+   - name_candidates     : disambiguation list
+   - inferred_specialty  : e.g. "Pediatrics", "Cardiology"
+   - context_flags       : list of clinical context notes
+   
+   4-step logic embedded in Gemini system prompt:
+   STEP 1 - Context Extraction (diagnosis/specialty first)
+   STEP 2 - Slash Notation (1/8 = every 8h, not 1/8 fraction)
+   STEP 3 - Drug Disambiguation via medical context
+   STEP 4 - Evidence-Based Interactions + Meal Timing
+
+B) ocr.py  Groq Safety Analysis Prompt Upgraded
+   New Groq (llama-4-scout) output fields:
+   - meal_timing         : e.g. "Take with food"
+   - inferred_specialty  : clinical specialty context
+   - context_flags       : safety context list
+
+C) chatbot.py  _SYSTEM_CLINICAL Upgraded
+   System prompt now positions BioMistral as a
+   "Clinical Pharmacologist" with the same 4-step framework.
+
+
+SECTION 3  CHANGES MADE IN THIS SESSION (NEW FEATURES)
+
+
+Feature 1: Drug Normalization (NEW FILE: drug_normalizer.py)
+
+File: drug_normalizer.py (NEW  did not exist before)
+Size: ~18KB | Catalog: 200+ brandgeneric entries
+
+API:
+  normalize(name: str) -> NormResult
+  normalize_list(names: list[str]) -> list[NormResult]
+  avg_confidence(results: list[NormResult]) -> float
+
+NormResult dataclass:
+  .generic        : INN/generic name
+  .brand_matched  : matched brand name (if applicable)
+  .confidence     : 0.01.0 confidence score
+  .match_type     : 'exact'|'alias'|'fuzzy'|'generic'|'not_found'
+  .notes          : human-readable explanation
+
+Confidence tiers:
+  exact match   = 0.97  (Panadol -> Paracetamol)
+  generic name  = 0.95  (input is already a generic INN)
+  alias/prefix  = 0.82  (prefix match >= 5 chars)
+  fuzzy >= 0.78 = 0.500.91 (SequenceMatcher ratio-scaled)
+  fuzzy >= 0.62 = 0.350.57 (low confidence, warn)
+  not_found     = 0.30  (pass-through, name kept as-is)
+
+Catalog categories (200+ entries):
+  Antibiotics: Augmentin, Hi-biotic, Ciproxin, Flagyl,
+               Zithromax, Klacid, Keflex, Zinnat, etc.
+  GI: Colovatil, Antinal, Nexium, Losec, Motilium, etc.
+  Analgesics: Panadol, Brufen, Voltaren, Celebrex, Tramal, etc.
+  Cardiovascular: Norvasc, Concor, Zestril, Cozaar, Plavix,
+                  Warfant, Lipitor, Crestor, Clexane, etc.
+  Diabetes: Glucophage, Amaryl, Diamicron, Jardiance, Lantus, etc.
+  Thyroid: Euthyrox, Eltroxin, Neomercazole, etc.
+  Asthma/COPD: Ventolin, Seretide, Symbicort, Singulair, etc.
+  Psychiatric/Neuro: Zoloft, Cipralex, Valium, Risperdal,
+                     Tegretol, Lyrica, etc.
+  Antihistamines: Clarityne, Zyrtec, Telfast, Phenergan, etc.
+  Steroids: Medrol, Decadron, Betnovate, Bactroban, etc.
+  Egyptian pediatric brands: V-Drop, Sanso Immune, Eubion,
+                              Limotal, Kidssi, Ferose, etc.
+
+Feature 2: Interaction Checker Upgrades (interaction_checker.py)
+
+Changes to interaction_checker.py:
+
+A) New function: _query_openfda(drug_a, drug_b) -> list[dict]
+   - Queries: https://api.fda.gov/drug/label.json
+   - Search: openfda.generic_name:"drug_a"
+   - Checks if drug_b appears in drug_interactions text
+   - timeout: 4 seconds
+   - Returns interaction dict with source="openfda"
+   - confidence: 0.72
+   - Fails silently if no internet
+
+B) 3-Tier interaction check in check_interactions():
+   Tier 1: SQLite (pharma.db)  confidence: 0.88, source: "sqlite"
+   Tier 2: Built-in _BUILTIN list  confidence: 0.92, source: "builtin"
+   Tier 3: OpenFDA API  confidence: 0.72, source: "openfda"
+   - Tier 3 only runs for pairs NOT already found in Tiers 1+2
+
+C) format_interaction_alert()  source badge added to HTML:
+   - sqlite  -> blue badge   (#E3F2FD / #1565C0) "Local DB XX%"
+   - builtin -> purple badge (#EDE7F6 / #4527A0) "Evidence Base XX%"
+   - openfda -> violet badge (#F3E5F5 / #6A1B9A) "OpenFDA XX%"
+   - XX% = interaction_confidence * 100, shown in badge
+
+Feature 3: OCR Confidence Integration (ocr.py)
+
+Changes to process_prescription_ocr():
+
+After medication extraction + interaction check, now calls:
+  from drug_normalizer import normalize_list, avg_confidence
+  _norm_results = normalize_list([med names])
+  
+  For each medication dict in parsed_meds:
+    .generic_name       = normalized INN name
+    .brand_matched      = matched brand (or None)
+    .name_match_type    = 'exact'|'alias'|'fuzzy'|etc.
+    .name_confidence    = 0.01.0
+    .normalization_notes = human-readable note
+
+New return dict fields:
+  "drug_match_confidence"  : avg of all drug name confidences
+  "interaction_confidence" : avg of all interaction confidences
+
+Feature 4: app.py UI Upgrades
+
+A) Confidence Dashboard (before AI disclaimer banner, line ~623)
+   3 color-coded progress bars:
+   - OCR Reading Confidence        (from Gemini confidence_score)
+   - Drug Name Match Confidence    (from drug_normalizer avg)
+   - Interaction Check Confidence  (from interaction avg)
+   Color coding: >= 80% = green | 60-79% = yellow | <60% = red
+
+B) Generic Name Badge (in each medication card header)
+   If generic_name exists and differs from brand name:
+   -> green pill badge: " Amoxicillin + Clavulanic Acid"
+   Shows: exact/alias matches in green, fuzzy in amber, not_found hidden
+
+C) Meal Timing Display (in frequency_alerts expander)
+   Uses meal_timing field from Groq STEP 4 output
+   Displayed with food emoji and distinct styling
+
+D) Interaction Source Badge (in interactions display)
+   Uses the new source badge HTML from format_interaction_alert()
+   Shows database source + confidence % for each interaction
+
+
+SECTION 4  COMPLETE FILE STATUS
+
+
+File                     Status        Changes
+
+drug_normalizer.py       NEW           Created (200+ mappings)
+interaction_checker.py   MODIFIED      OpenFDA tier, confidence
+ocr.py                   MODIFIED      Normalizer call, conf fields
+app.py                   MODIFIED      3 UI panels, badges, bars
+chatbot.py               MODIFIED (prev session) Clinical prompts
+rag_engine.py            UNCHANGED     ChromaDB + TF-IDF RAG
+drug_db.py               UNCHANGED     SQLite + JSON fallback
+drug_lookup.py           UNCHANGED     RxNorm API
+database.py              UNCHANGED     SQLite schema
+
+
+SECTION 5  SYSTEM ARCHITECTURE DIAGRAM (CURRENT)
+
+
+Prescription Image
+       |
+       v
+preprocess_prescription_image()   [ocr.py]
+  - OpenCV: upscale, deskew, CLAHE, bilateral, unsharp, stamp removal
+       |
+       v
+process_prescription_ocr()        [ocr.py]                     
+  - Gemini 2.5 Flash Vision (JSON mode)                        
+  - Clinical Pharmacologist 4-step prompt                       
+  - Returns: patient, prescriber, medications, confidence_score 
+       |
+       +---> drug_normalizer.normalize_list()   [NEW]
+       |       - Brand -> Generic mapping (200+ entries)
+       |       - Adds generic_name, name_confidence to each med
+       |       - Returns drug_match_confidence (avg)
+       |
+       +---> interaction_checker.check_interactions()
+       |       - Tier 1: SQLite (pharma.db) [conf: 0.88]
+       |       - Tier 2: Built-in evidence list [conf: 0.92]
+       |       - Tier 3: OpenFDA API [conf: 0.72]  [NEW]
+       |       - Returns interactions with source + confidence
+       |
+       v
+analyze_prescription_safety()     [ocr.py -> Groq API]
+  - Model: meta-llama/llama-4-scout-17b-16e-instruct
+  - Clinical Pharmacologist 4-step safety prompt
+  - Returns: dosing_errors, interactions, frequency_alerts,
+             meal_timing, inferred_specialty, context_flags
+
+       |
+       v
+app.py  Prescription Scanner UI
+  - Confidence Dashboard (3 bars: OCR%, Drug Match%, Interaction%)
+  - Medication Cards with Generic Name Badges
+  - Interaction Alerts with Source Badges (DB/Evidence/OpenFDA)
+  - Meal Timing in Frequency Alerts
+
+
+User Chat Question
+       |
+       v
+chatbot.py
+  - Abbreviation expansion
+  - Clinical intent detection
+  - RAG retrieval (if clinical)
+       |
+       +---> rag_engine.retrieve()
+       |       - ChromaDB vector search (nomic-embed-text)
+       |       - TF-IDF fallback (if Ollama offline)
+       |       - Returns relevant drug knowledge chunks
+       |
+       v
+BioMistral 7B via Ollama (http://localhost:11434)
+  - Model: adrienbrault/biomistral-7b:Q4_K_M
+  - Clinical Pharmacologist system prompt
+  - RAG context injected as VERIFIED CLINICAL REFERENCES
+
+
+SECTION 6  ENVIRONMENT & DEPENDENCIES
+
+
+Python: 3.10 | Windows | venv: .venv
+Streamlit: 1.55.0
+Key env vars:
+  GEMINI_API_KEY   -> Gemini 2.5 Flash OCR
+  GROQ_API_KEY     -> llama-4-scout safety analysis
+  PHARMA_MODEL     -> override BioMistral model
+  PHARMA_DB_PATH   -> override SQLite path (default: pharma.db)
+
+Ollama must be running locally:
+  ollama serve
+  ollama pull adrienbrault/biomistral-7b:Q4_K_M
+  ollama pull nomic-embed-text
+
+Run app:
+  cd pharmaAI
+  .\.venv\Scripts\Activate.ps1
+  streamlit run app.py
+
+
+SECTION 7  TASKS COMPLETED / PENDING
+
+
+COMPLETED:
+  [x] Clinical Pharmacologist Gemini OCR prompt (4 steps)
+  [x] Clinical Pharmacologist Groq safety prompt (4 steps)
+  [x] Clinical Pharmacologist BioMistral system prompt
+  [x] New OCR JSON fields: diagnosis_context, slash_notation_used,
+      dose_interpretation, name_candidates, inferred_specialty,
+      context_flags, meal_timing
+  [x] drug_normalizer.py  200+ brand->generic mappings
+  [x] interaction_checker.py  OpenFDA Tier 3 integration
+  [x] interaction_checker.py  source + confidence fields
+  [x] interaction_checker.py  source badge in HTML alerts
+  [x] ocr.py  normalizer call, generic_name fields on each med
+  [x] ocr.py  drug_match_confidence + interaction_confidence fields
+  [x] app.py  3-bar Confidence Dashboard
+  [x] app.py  Generic Name Badges in medication cards
+  [x] app.py  Meal Timing display in frequency alerts
+  [x] app.py  Interaction source badges
+
+POSSIBLE FUTURE IMPROVEMENTS:
+  [ ] Cache OpenFDA results in SQLite to reduce API calls
+  [ ] Expand drug_normalizer.py catalog beyond 200 entries
+  [ ] Add DrugBank API (requires API key) as Tier 4 interactions
+  [ ] RAG: add more clinical guidelines to knowledge_base/drugs.json
+  [ ] Add patient weight/age for pediatric dose calculations
+  [ ] Multi-language output (Arabic UI option)
+
+=========================================================
