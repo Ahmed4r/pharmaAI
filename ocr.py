@@ -328,7 +328,8 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
 
 
 def analyze_prescription_safety(parsed_meds: list, patient: str = "",
-                                 prescriber: str = "") -> dict:
+                                 prescriber: str = "",
+                                 patient_weight_kg: float = 0.0) -> dict:
     """Run Groq safety analysis: dosing errors, interactions, frequency alerts.
     UI labels this as Tesseract.js; backend uses meta-llama/llama-4-scout-17b-16e-instruct.
     """
@@ -419,6 +420,60 @@ def analyze_prescription_safety(parsed_meds: list, patient: str = "",
         result.setdefault("interactions", [])
         result.setdefault("frequency_alerts", [])
         result.setdefault("summary", "")
+
+        # --- MODULE 3: Strict Administration Rules (override LLM meal_timing) ---
+        _STRICT_RULES = {
+            "cholecalciferol": "MUST take with a fatty meal.",
+            "vitamin d3":      "MUST take with a fatty meal.",
+            "cyproheptadine":  "MUST take 15-30 mins BEFORE meals.",
+        }
+        for _med_sr in parsed_meds:
+            _med_name_sr = (
+                (_med_sr.get("generic_name") or _med_sr.get("name") or "")
+                .lower().strip()
+            )
+            for _rule_key, _rule_val in _STRICT_RULES.items():
+                if _rule_key in _med_name_sr:
+                    _found_fa = False
+                    for _fa_item in result["frequency_alerts"]:
+                        if _rule_key in (_fa_item.get("drug") or "").lower():
+                            _fa_item["meal_timing"] = _rule_val
+                            _found_fa = True
+                            break
+                    if not _found_fa:
+                        result["frequency_alerts"].append({
+                            "drug": _med_sr.get("generic_name") or _med_sr.get("name"),
+                            "prescribed_frequency": _med_sr.get("frequency") or "N/A",
+                            "standard_frequency": "As prescribed",
+                            "meal_timing": _rule_val,
+                            "severity": "moderate",
+                            "recommendation": _rule_val,
+                        })
+                    break
+
+        # --- MODULE 2: Pediatric Weight-Based Dosage Validation ---
+        if patient_weight_kg and patient_weight_kg > 0:
+            try:
+                from dosing_validator import check_pediatric_dose as _cpd
+                for _med_pd in parsed_meds:
+                    _pd_name = (
+                        _med_pd.get("generic_name") or _med_pd.get("name") or ""
+                    )
+                    _pd_dose = _med_pd.get("dosage") or ""
+                    _pd_warn = _cpd(_pd_name, _pd_dose, patient_weight_kg)
+                    if _pd_warn:
+                        result["dosing_errors"].append({
+                            "drug": _pd_name,
+                            "prescribed_dose": _pd_dose,
+                            "safe_range": (
+                                f"max {15 * patient_weight_kg:.0f} mg "
+                                f"(15 mg/kg for {patient_weight_kg:.1f} kg)"
+                            ),
+                            "severity": "major",
+                            "recommendation": _pd_warn,
+                        })
+            except Exception:
+                pass
         try:
             from database import log_event as _le
             _total = (len(result["dosing_errors"]) +

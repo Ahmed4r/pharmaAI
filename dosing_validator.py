@@ -203,3 +203,40 @@ def validate_prescription(parsed_meds: list[dict]) -> list[dict]:
             continue
         results.append(validate_dose(drug, dose, unit))
     return results
+
+
+def check_pediatric_dose(drug_generic_name: str, extracted_dosage_str: str,
+                          patient_weight_kg: float):
+    """
+    Weight-based pediatric safety check.
+
+    Returns a warning string if dose exceeds the weight-adjusted maximum,
+    or None if the dose is safe / cannot be evaluated.
+
+    Rules implemented
+    -----------------
+    - Paracetamol / Acetaminophen : max 15 mg/kg per single dose
+    """
+    if not drug_generic_name or not extracted_dosage_str or not patient_weight_kg:
+        return None
+
+    norm = _normalise(drug_generic_name)
+
+    # Extract mg value from dosage string
+    mg_m = re.search(r"(\d+(?:\.\d+)?)\s*mg", extracted_dosage_str, re.I)
+    if not mg_m:
+        return None
+    dose_mg = float(mg_m.group(1))
+
+    # Paracetamol / Acetaminophen  max 15 mg/kg/dose
+    if norm in ("paracetamol", "acetaminophen"):
+        max_safe = 15.0 * patient_weight_kg
+        if dose_mg > max_safe:
+            return (
+                f"PEDIATRIC OVERDOSE WARNING: {drug_generic_name} {dose_mg:.0f} mg "
+                f"exceeds maximum safe pediatric dose of {max_safe:.0f} mg "
+                f"({patient_weight_kg:.1f} kg patient; limit 15 mg/kg per dose). "
+                "Reduce dose immediately."
+            )
+
+    return None

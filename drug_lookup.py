@@ -89,11 +89,60 @@ def _http_get(url: str, timeout: int = 5) -> dict | None:
         return None
 
 
+
+#  OpenFDA cache helpers (Module 1) 
+
+def _cache_get(name: str):
+    """Return cached OpenFDA profile if within 30 days, else None."""
+    try:
+        from database import get_connection, init_db
+        init_db()
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT profile_json FROM openfda_cache "
+            "WHERE generic_name = ? AND datetime(timestamp) > datetime('now', '-30 days')",
+            (name.lower(),),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            from json import loads as _loads
+            profile = _loads(row["profile_json"])
+            profile["_source"] = "openfda_cached"
+            return profile
+    except Exception:
+        pass
+    return None
+
+
+def _cache_put(name: str, profile: dict) -> None:
+    """Save an OpenFDA profile dict to the local SQLite cache."""
+    try:
+        from json import dumps as _dumps
+        from database import get_connection, init_db
+        init_db()
+        conn = get_connection()
+        conn.execute(
+            "INSERT OR REPLACE INTO openfda_cache (generic_name, profile_json) VALUES (?, ?)",
+            (name.lower(), _dumps(profile)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 #  Tier 2: OpenFDA drug label 
 
 def _openfda_lookup(name: str) -> dict | None:
     """Query OpenFDA label API for a drug name; return parsed dict or None."""
     name_l = name.lower().strip()
+
+    # Check SQLite cache first (Module 1)
+    cached = _cache_get(name_l)
+    if cached:
+        return cached
 
     for search_field in ("openfda.generic_name", "openfda.brand_name"):
         # NOTE: pass raw quoted string to urlencode  it will encode correctly
@@ -112,7 +161,9 @@ def _openfda_lookup(name: str) -> dict | None:
                 [n.lower() for n in ofda.get("substance_name", [])]
             )
             if any(name_l in n or n in name_l for n in all_names):
-                return _parse_openfda_label(label)
+                result = _parse_openfda_label(label)
+                _cache_put(name_l, result)
+                return result
 
     # Retry with US (USAN/FDA) name if INN name not found in OpenFDA
     usan = _INN_TO_USAN.get(name.lower().strip())

@@ -683,6 +683,18 @@ elif active_page == "Prescription Scanner":
                     st.text_input("&#129658; Prescriber", value=_pre, key="edit_prescriber",
                                   placeholder="Dr. Name")
 
+                _wc1, _wc2, _wc3, _wc4 = st.columns(4)
+                with _wc1:
+                    st.number_input(
+                        "⚖️ Patient Weight (kg)",
+                        min_value=2.0,
+                        max_value=150.0,
+                        value=float(st.session_state.get("patient_weight_kg", 20.0)),
+                        step=0.5,
+                        key="patient_weight_kg",
+                        help="Used for pediatric weight-based dosage safety checks",
+                    )
+
                 st.markdown("---")
 
                 #  Medications (all fields always editable) 
@@ -788,16 +800,77 @@ elif active_page == "Prescription Scanner":
                     "&#128269;&#65039; Detect Errors & Interactions",
                     use_container_width=True, key="run_safety_btn",
                 ):
-                    with st.spinner(
-                        "Tesseract.js analysing prescription for errors..."
-                    ):
-                        _safety = analyze_prescription_safety(
-                            parsed_meds,
-                            patient=ocr.get("patient", ""),
-                            prescriber=ocr.get("prescriber", ""),
+                    _low_conf_ids = [
+                        (i, m) for i, m in enumerate(parsed_meds)
+                        if m.get("name_confidence", 1.0) < 0.75
+                    ]
+                    if _low_conf_ids:
+                        st.session_state.show_low_conf_review = True
+                        st.rerun()
+                    else:
+                        st.session_state.show_low_conf_review = False
+                        with st.spinner("Tesseract.js analysing prescription for errors..."):
+                            _safety = analyze_prescription_safety(
+                                parsed_meds,
+                                patient=ocr.get("patient", ""),
+                                prescriber=ocr.get("prescriber", ""),
+                                patient_weight_kg=float(
+                                    st.session_state.get("patient_weight_kg", 0.0)
+                                ),
+                            )
+                        st.session_state.safety_result = _safety
+                        st.rerun()
+
+                # --- MODULE 4: Low-Confidence Manual Override ---
+                if st.session_state.get("show_low_conf_review"):
+                    _low_conf_items = [
+                        (i, m) for i, m in enumerate(parsed_meds)
+                        if m.get("name_confidence", 1.0) < 0.75
+                    ]
+                    st.warning(
+                        "⚠️ Low confidence in reading some drug names. "
+                        "Please verify before running safety analysis."
+                    )
+                    for _lci, _lcm in _low_conf_items:
+                        _cands = list(_lcm.get("name_candidates") or [])
+                        _orig_name = (_lcm.get("name") or "").strip()
+                        if _orig_name and _orig_name not in _cands:
+                            _cands.insert(0, _orig_name)
+                        _cands = [c for c in _cands if c] or ["Unknown"]
+                        _conf_pct = int(round(_lcm.get("name_confidence", 0.0) * 100))
+                        st.selectbox(
+                            f"Medication {_lci + 1} "
+                            f"(confidence: {_conf_pct}%) — select correct name:",
+                            options=_cands,
+                            key=f"low_conf_select_{_lci}",
                         )
-                    st.session_state.safety_result = _safety
-                    st.rerun()
+                    if st.button(
+                        "✅ Confirm & Proceed to Safety Analysis",
+                        use_container_width=True,
+                        key="low_conf_confirm_btn",
+                        type="primary",
+                    ):
+                        _rj_live = st.session_state.ocr_result.get("raw_json", {})
+                        _pm_live = _rj_live.get("medications") or []
+                        for _lci2, _lcm2 in [
+                            (i, m) for i, m in enumerate(_pm_live)
+                            if m.get("name_confidence", 1.0) < 0.75
+                        ]:
+                            _sel_name = st.session_state.get(f"low_conf_select_{_lci2}")
+                            if _sel_name:
+                                _lcm2["name"] = _sel_name
+                        with st.spinner("Tesseract.js analysing prescription for errors..."):
+                            _safety = analyze_prescription_safety(
+                                _pm_live,
+                                patient=ocr.get("patient", ""),
+                                prescriber=ocr.get("prescriber", ""),
+                                patient_weight_kg=float(
+                                    st.session_state.get("patient_weight_kg", 0.0)
+                                ),
+                            )
+                        st.session_state.safety_result = _safety
+                        st.session_state.show_low_conf_review = False
+                        st.rerun()
 
                 _sr = st.session_state.get("safety_result")
                 if _sr:
@@ -1204,6 +1277,13 @@ elif active_page == "Drug Lookup":
             f"Also known as: {brands_str}</div>"
             f"<div style='margin-top:.45rem;'>"
             f"<span class='drug-tag'>{info['drug_class']}</span>"
+            + ((
+                "&ensp;<span style='background:#E0F4FF;color:#0277BD;"
+                "padding:2px 10px;border-radius:20px;font-size:.72rem;"
+                "font-weight:600;border:1px solid #0277BD;'>"
+                + {"openfda":"&#127757; OpenFDA","rxnorm":"&#128197; RxNorm","local":"&#128218; Local DB"}.get(info.get("_source",""),"")
+                + "</span>"
+            ) if info.get("_source","") else "") +
             f"</div>"
             f"</div>"
             f"<div style='text-align:right; font-size:.78rem; color:#6B8CAE;'>"
@@ -1231,7 +1311,7 @@ elif active_page == "Drug Lookup":
                 for ind in info["indications"]:
                     st.markdown(f"- {ind}")
             else:
-                st.markdown("*No data  connect to RxNorm/DrugBank API.*")
+                st.markdown("*No indication data in OpenFDA label.*")
 
             st.markdown("**Standard Dosage**")
             st.markdown(

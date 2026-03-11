@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS prescriptions (
 
 CREATE INDEX IF NOT EXISTS idx_rx_patient ON prescriptions(patient);
 CREATE INDEX IF NOT EXISTS idx_rx_time    ON prescriptions(created_at);
+
+CREATE TABLE IF NOT EXISTS openfda_cache (
+    generic_name TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL,
+    timestamp    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 # ---------------------------------------------------------------------------
