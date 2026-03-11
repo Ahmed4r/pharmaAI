@@ -724,6 +724,44 @@ def generate_response(
     -------
     str  the assistant response (may contain Markdown)
     """
+    # Short-circuit for casual/greeting messages -- no clinical framework needed
+    _casual_re = re.compile(
+        r"^\s*(hi+|hello+|hey+|howdy|greetings|good\s*(morning|afternoon|evening|day)|"
+        r"how are you|what.s up|sup|yo|thanks?|thank you|ok|okay|bye|goodbye|"
+        r"who are you|what are you|what can you do|help)[\.!?\s]*$",
+        re.IGNORECASE,
+    )
+    if _casual_re.match(user_message):
+        _casual_sys = (
+            "You are a friendly Drug Safety Assistant. "
+            "Respond naturally and conversationally to greetings and small talk. "
+            "Be warm but brief. If the user seems ready to ask a clinical question, "
+            "invite them to do so."
+        )
+        if mode == "cloud":
+            return _chat_groq(_casual_sys, user_message, groq_api_key)
+        else:
+            return query_ollama_llm(user_message, [])
+
+    # Short-circuit for casual/greeting messages -- no clinical framework needed
+    _casual_re = re.compile(
+        r"^\s*(hi+|hello+|hey+|howdy|greetings|good\s*(morning|afternoon|evening|day)|"
+        r"how are you|what.s up|sup|yo|thanks?|thank you|ok|okay|bye|goodbye|"
+        r"who are you|what are you|what can you do|help)[\.!?\s]*$",
+        re.IGNORECASE,
+    )
+    if _casual_re.match(user_message):
+        _casual_sys = (
+            "You are a friendly Drug Safety Assistant. "
+            "Respond naturally and conversationally to greetings and small talk. "
+            "Be warm but brief. If the user seems ready to ask a clinical question, "
+            "invite them to do so."
+        )
+        if mode == "cloud":
+            return _chat_groq(_casual_sys, user_message, groq_api_key)
+        else:
+            return query_ollama_llm(user_message, [])
+
     if mode == "cloud":
         # Re-use the same query-expansion + RAG + system-prompt logic, then send
         # to Groq instead of Ollama.  We build the composite system prompt inline
