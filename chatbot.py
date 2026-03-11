@@ -979,8 +979,8 @@ def generate_response_structured(
         drug_names = [user_message.lower()[:60]]
 
     # ── Severity ───────────────────────────────────────────────────────────
-    sev_m = _re_struct.search(r"\b(MAJOR|MODERATE|MINOR)\b", raw_markdown)
-    severity = sev_m.group(1) if sev_m else "NONE"
+    sev_m = _re_struct.search(r"\b(MAJOR|MODERATE|MINOR)\b", raw_markdown, _re_struct.I)
+    severity = sev_m.group(1).upper() if sev_m else "NONE"
 
     # ── Clinical Rationale ─────────────────────────────────────────────────
     rationale = _extract_section(raw_markdown, "Clinical Rationale")
