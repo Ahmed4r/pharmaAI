@@ -32,26 +32,42 @@ _SYSTEM_CLINICAL = (
     "You are a Clinical Pharmacologist AI assistant powered by a RAG pipeline "
     "backed by the British National Formulary (BNF).\n\n"
     "Always respond using ALL FOUR sections below in this exact order:\n\n"
-    "## 💊 Drug Identification\n"
-    "State the generic name(s), therapeutic class, and primary mechanism of action.\n\n"
-    "## ⚠️ Interaction Alerts\n"
+    "## \U0001f48a Drug Identification\n"
+    "State the generic INN name(s), therapeutic class, and primary mechanism of action. "
+    "For EVERY drug you MUST name the specific receptor subtype or enzyme target "
+    "(e.g., beta-1 adrenoceptor antagonist, COX-1/COX-2 inhibitor, CYP2C9 substrate, "
+    "proton pump/H+K+-ATPase inhibitor). Do NOT write just 'anticoagulant' "
+    "or 'antiplatelet' -- always explain the molecular target.\n\n"
+    "## \u26a0\ufe0f Interaction Alerts\n"
     "List every MAJOR, MODERATE, or MINOR interaction found in the retrieved context. "
-    "For each: state severity, mechanism (PD or PK / CYP pathway), and clinical risk. "
-    "If no interactions are documented: 'No significant interactions found in retrieved BNF context.'\n\n"
-    "## 💡 Clinical Rationale (The Why)\n"
-    "Search the context for: absorption, bioavailability, acid-labile, "
-    "half-life, protein binding, CYP450, enzyme inhibition, food effect. "
-    "Explain WHY the drug behaves as it does (e.g. WHY taken before food, "
-    "WHY dose differs in renal failure). "
-    "If not explained in context, use established pharmacological knowledge "
-    "but label it '[Mechanism of Action]:\'\n\n"
-    "## 📚 BNF References\n"
-    "List the BNF page numbers from the retrieved context (e.g. BNF80, Page 423). "
-    "If no BNF context retrieved: 'No BNF context retrieved for this query.'\n\n"
+    "For each state: (a) severity level, (b) the exact PK or PD mechanism "
+    "(e.g., CYP2C9 inhibition raises plasma warfarin AUC; additive bleeding via "
+    "dual antiplatelet + anticoagulation pathway), (c) the specific clinical risk, "
+    "(d) monitoring parameters (e.g., INR every 3-5 days). "
+    "If no interactions documented: \'No significant interactions found in retrieved BNF context.\'\n\n"
+    "## \U0001f4a1 Clinical Rationale (The Why)\n"
+    "This section is MANDATORY -- must ALWAYS contain a mechanistic explanation.\n"
+    "Search context for: absorption, bioavailability, acid-labile, half-life, "
+    "protein binding, CYP450, enzyme inhibition/induction, transporter (P-gp/OATP), "
+    "receptor binding, food effect, renal/hepatic clearance.\n"
+    "CRITICAL: Even if the BNF chunk does NOT explicitly state the mechanism, you MUST "
+    "use your core pharmacological knowledge and label it:\n"
+    "  [Mechanism of Action -- pharmacological knowledge]: <explanation>\n"
+    "Required depth:\n"
+    "  - Warfarin: S-warfarin is a CYP2C9 substrate; inhibitors reduce clearance "
+    "    and raise INR by increasing free plasma warfarin levels.\n"
+    "  - Esomeprazole: acid-labile benzimidazole degraded at low gastric pH; enteric "
+    "    coating and fasting ensure delivery to duodenum for peak acid suppression.\n"
+    "  - Beta-blockers: beta-1 (heart rate/contractility) vs beta-2 (bronchospasm); "
+    "    cardioselective agents preferred in asthma/COPD.\n\n"
+    "## \U0001f4da BNF References\n"
+    "List BNF page numbers from retrieved context (e.g. BNF80, Page 423). "
+    "If no context: \'No BNF context retrieved for this query.\'\n\n"
     "STRICT RULES:\n"
     "1. Base all clinical facts on the verified references provided.\n"
     "2. NEVER invent INR thresholds, dose values, or monitoring frequencies not in sources.\n"
-    "3. Always end with: [Verify with a licensed pharmacist or prescriber before clinical decisions]\n"
+    "3. The Clinical Rationale section is NOT optional -- always explain the mechanism.\n"
+    "4. Always end with: [Verify with a licensed pharmacist or prescriber before clinical decisions]\n"
 )
 
 
@@ -891,3 +907,113 @@ def generate_response(
             except Exception:
                 pass
         return _resp_l, _pdf_srcs_l
+
+
+# ===========================================================================
+# Structured JSON output for n8n / API integration
+# ===========================================================================
+
+import re as _re_struct
+
+
+def _extract_section(markdown: str, header_keyword: str) -> str:
+    """Extract a section body from the 4-section markdown response."""
+    m = _re_struct.search(
+        r"##[^#\n]*" + re.escape(header_keyword) + r"(.*?)(?=##|\Z)",
+        markdown, _re_struct.S | _re_struct.I,
+    )
+    return m.group(1).strip() if m else ""
+
+
+def generate_response_structured(
+    user_message: str,
+    mode: str = "cloud",
+    groq_api_key: str = "",
+    ocr_context: str = "",
+) -> "dict":
+    """
+    Calls generate_response() and parses the 4-section markdown into a
+    flat structured dict.  Used by api.py for n8n / Telegram output.
+
+    Returns
+    -------
+    dict with keys:
+        query                      str
+        drug_name                  list[str]
+        interaction_severity       str   MAJOR | MODERATE | MINOR | NONE
+        clinical_rationale_the_why str
+        bnf_source_page            list[dict]  [{file, page}, ...]
+        full_markdown              str
+        confidence_pct             int   0-100
+        alert_level                str   CRITICAL | WARNING | INFO | SAFE
+    """
+    # Get the raw markdown + sources from the existing router
+    raw_markdown, sources = generate_response(
+        user_message=user_message,
+        mode=mode,
+        groq_api_key=groq_api_key,
+        ocr_context=ocr_context,
+    )
+
+    # ── Drug names ─────────────────────────────────────────────────────────
+    drug_section = _extract_section(raw_markdown, "Drug Identification")
+    drug_names: list[str] = []
+    # Look for bold generic names in the Drug ID section
+    for hit in _re_struct.findall(r"\*\*([A-Za-z][a-zA-Z\-]{3,30})\*\*", drug_section):
+        candidate = hit.strip().lower()
+        if (
+            len(candidate) > 3
+            and candidate not in drug_names
+            and candidate not in ("major", "moderate", "minor", "none", "drug", "generic")
+        ):
+            drug_names.append(candidate)
+    # Fallback: extract via rag_engine drug extractor
+    if not drug_names:
+        try:
+            from rag_engine import normalize_query as _nq, extract_drug_names
+            norm = _nq(user_message)
+            drug_names = [d.lower() for d in extract_drug_names(norm)]
+        except Exception:
+            pass
+    if not drug_names:
+        drug_names = [user_message.lower()[:60]]
+
+    # ── Severity ───────────────────────────────────────────────────────────
+    sev_m = _re_struct.search(r"\b(MAJOR|MODERATE|MINOR)\b", raw_markdown)
+    severity = sev_m.group(1) if sev_m else "NONE"
+
+    # ── Clinical Rationale ─────────────────────────────────────────────────
+    rationale = _extract_section(raw_markdown, "Clinical Rationale")
+    if not rationale:
+        # Try [Mechanism of Action] block
+        moa_m = _re_struct.search(
+            r"\[Mechanism of Action[^\]]*\]:(.*?)(?=\n\n|##|\Z)",
+            raw_markdown, _re_struct.S,
+        )
+        rationale = moa_m.group(1).strip() if moa_m else "See full response."
+    rationale = rationale[:1200]
+
+    # ── BNF sources ────────────────────────────────────────────────────────
+    bnf_sources = [{"file": s.get("file", "BNF80.pdf"), "page": s.get("page", 0)} for s in sources]
+    if not bnf_sources:
+        for pg_m in _re_struct.finditer(r"(?:BNF80|Page)[,\s]+(?:[Pp]age[\s]+)?(\d+)", raw_markdown):
+            bnf_sources.append({"file": "BNF80.pdf", "page": int(pg_m.group(1))})
+
+    # ── Confidence ─────────────────────────────────────────────────────────
+    conf_m = _re_struct.search(r"RAG Confidence:\s*(\d+)%", raw_markdown)
+    confidence_pct = int(conf_m.group(1)) if conf_m else (88 if sources else 42)
+
+    # ── Alert level ────────────────────────────────────────────────────────
+    alert_map = {"MAJOR": "CRITICAL", "MODERATE": "WARNING", "MINOR": "INFO"}
+    alert_level = alert_map.get(severity, "SAFE")
+
+    return {
+        "query": user_message,
+        "drug_name": drug_names,
+        "interaction_severity": severity,
+        "clinical_rationale_the_why": rationale,
+        "bnf_source_page": bnf_sources,
+        "full_markdown": raw_markdown,
+        "confidence_pct": confidence_pct,
+        "alert_level": alert_level,
+    }

@@ -1,0 +1,405 @@
+{
+  "name": "PharmaAI Clinical Alert Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook - Receive Mobile Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pharma-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Step 1: Entry point. Mobile app or pharmacist portal sends POST to this webhook.\nExpected body: { query: string, image_url?: string, patient_weight_kg?: number }"
+    },
+    {
+      "id": "2",
+      "name": "Route - Has Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.image_url }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "notes": "If image_url provided: run OCR first. Otherwise: go straight to RAG query."
+    },
+    {
+      "id": "3",
+      "name": "PharmaAI OCR - Prescription Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        720,
+        180
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/ocr",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.PHARMA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $json.body.image_url }}"
+            },
+            {
+              "name": "patient_weight_kg",
+              "value": "={{ $json.body.patient_weight_kg || 0 }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "notes": "Calls /ocr endpoint. Returns OCR + safety analysis with drug names, interactions, dosing errors."
+    },
+    {
+      "id": "4",
+      "name": "Build Query from OCR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        960,
+        180
+      ],
+      "parameters": {
+        "jsCode": "// Extract drug names from OCR and build a RAG query\nconst ocrData = $json.ocr || {};\nconst safetyData = $json.safety || {};\nconst drugNames = ($json.drug_names || []).filter(Boolean).join(' and ');\nconst hasMajor = $json.has_major_interaction;\n\n// Build a targeted clinical query from OCR results\nconst queryParts = [];\nif (drugNames) queryParts.push(drugNames + ' interaction');\nif (safetyData.dosing_errors && safetyData.dosing_errors.length > 0) {\n  queryParts.push('dosing safety check');\n}\n\nconst finalQuery = queryParts.join(' and ') || $('Webhook - Receive Mobile Request').first().json.body.query;\n\nreturn [{\n  json: {\n    query: finalQuery,\n    hasMajorInteraction: hasMajor,\n    ocrResult: { ocr: ocrData, safety: safetyData },\n    drugNames: $json.drug_names || []\n  }\n}];"
+      },
+      "notes": "Constructs a RAG query string from OCR drug names + safety alerts."
+    },
+    {
+      "id": "5",
+      "name": "PharmaAI RAG Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.PHARMA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query || $('Webhook - Receive Mobile Request').first().json.body.query }}"
+            },
+            {
+              "name": "mode",
+              "value": "cloud"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "notes": "Step 2: Core RAG call. Returns StructuredClinicalResponse with drug_name, interaction_severity, clinical_rationale_the_why, bnf_source_page."
+    },
+    {
+      "id": "6",
+      "name": "Format Telegram Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const data = $json;\nconst alertIcons = {\n  CRITICAL: '\\u{1f6a8}',\n  WARNING:  '\\u26a0\\ufe0f',\n  INFO:     '\\u2139\\ufe0f',\n  SAFE:     '\\u2705'\n};\nconst severityColors = {\n  CRITICAL: '\\u{1f534}',\n  WARNING:  '\\u{1f7e1}',\n  INFO:     '\\u{1f535}',\n  SAFE:     '\\u{1f7e2}'\n};\n\nconst icon  = alertIcons[data.alert_level]  || '\\u2139\\ufe0f';\nconst color = severityColors[data.alert_level] || '\\u{1f535}';\nconst drugs = (data.drug_name || []).map(d => d.toUpperCase()).join(' + ');\nconst sources = (data.bnf_source_page || [])\n  .map(s => `BNF80 p.${s.page}`).join(', ') || 'No BNF sources';\n\n// Truncate rationale for messenger\nconst rationale = (data.clinical_rationale_the_why || '')\n  .replace(/\\[Mechanism[^\\]]*\\]:/g, '\\u{1f9ea} Mechanism:')\n  .substring(0, 600)\n  .trim();\n\nconst msg = [\n  `${icon} *PHARMA ALERT* ${color}`,\n  `*Severity:* ${data.interaction_severity || 'NONE'}`,\n  `*Drugs:* ${drugs || data.query}`,\n  '',\n  `*Clinical Rationale:*`,\n  rationale,\n  '',\n  `*BNF Sources:* ${sources}`,\n  `*RAG Confidence:* ${data.confidence_pct}%`,\n  '',\n  `\\_Query:\\_  ${data.query}`,\n  '',\n  '\\u{1f4cb} _Verify with a licensed pharmacist before clinical decisions_'\n].join('\\n');\n\nreturn [{ json: { telegram_text: msg, alert_level: data.alert_level, structured: data } }];"
+      },
+      "notes": "Formats the structured response into a Telegram-ready MarkdownV2 message."
+    },
+    {
+      "id": "7",
+      "name": "Route by Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        300
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.alert_level }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "CRITICAL",
+              "output": 0
+            },
+            {
+              "value2": "WARNING",
+              "output": 1
+            },
+            {
+              "value2": "INFO",
+              "output": 2
+            },
+            {
+              "value2": "SAFE",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "notes": "Routes CRITICAL/WARNING to urgent Telegram channel; INFO/SAFE to standard channel."
+    },
+    {
+      "id": "8",
+      "name": "Telegram - CRITICAL Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        120
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CRITICAL_CHAT_ID }}",
+        "text": "={{ $json.telegram_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "notes": "Step 3: Sends CRITICAL/MAJOR alerts to urgent pharmacist channel immediately."
+    },
+    {
+      "id": "9",
+      "name": "Telegram - Standard Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        360
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_STANDARD_CHAT_ID }}",
+        "text": "={{ $json.telegram_text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": true
+        }
+      },
+      "notes": "Sends WARNING/INFO to standard pharmacist notification channel."
+    },
+    {
+      "id": "10",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        300
+      ],
+      "parameters": {
+        "options": {
+          "responseBody": "={{ JSON.stringify($('PharmaAI RAG Query').first().json) }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "notes": "Returns the StructuredClinicalResponse JSON back to the mobile app."
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Mobile Request": {
+      "main": [
+        [
+          {
+            "node": "Route - Has Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route - Has Image?": {
+      "main": [
+        [
+          {
+            "node": "PharmaAI OCR - Prescription Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PharmaAI RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PharmaAI OCR - Prescription Analysis": {
+      "main": [
+        [
+          {
+            "node": "Build Query from OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Query from OCR": {
+      "main": [
+        [
+          {
+            "node": "PharmaAI RAG Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PharmaAI RAG Query": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Route by Severity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Severity": {
+      "main": [
+        [
+          {
+            "node": "Telegram - CRITICAL Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Standard Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Standard Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram - CRITICAL Alert": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram - Standard Alert": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    "pharmaai",
+    "clinical",
+    "rag",
+    "telegram"
+  ],
+  "meta": {
+    "templateId": "pharmaai-clinical-alert",
+    "description": "PharmaAI n8n workflow. Step 1: Webhook receives query + optional prescription image from mobile app. Step 2: Calls Python FastAPI backend for Gemini OCR and/or ChromaDB RAG. Step 3: Formats and sends structured clinical alert to Telegram pharmacist channel. Required env vars: PHARMA_API_KEY, TELEGRAM_CRITICAL_CHAT_ID, TELEGRAM_STANDARD_CHAT_ID."
+  }
+}
