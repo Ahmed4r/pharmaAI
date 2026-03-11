@@ -1,4 +1,4 @@
-import re
+﻿import re
 import streamlit as st
 import streamlit.components.v1 as _st_components
 import time
@@ -305,6 +305,13 @@ try:
     if _qnav and _qnav in _QP_PAGES:
         st.session_state["nav_page"] = _qnav
         st.query_params.clear()
+    _qmodel = st.query_params.get("model")
+    if _qmodel in ("cloud", "local"):
+        st.session_state["llm_mode"] = _qmodel
+        st.session_state["llm_mode_radio"] = (
+            "☁️  Cloud (Groq)" if _qmodel == "cloud" else "💻  Local (Ollama)"
+        )
+        st.query_params.clear()
 except Exception:
     pass
 
@@ -377,49 +384,110 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    # ── LLM Engine toggle
-    st.markdown(
-        "<div style='font-size:.7rem;font-weight:700;color:#90C4E0;"
-        "letter-spacing:.08em;margin-bottom:.35rem;'>AI ENGINE</div>",
-        unsafe_allow_html=True,
-    )
-    st.radio(
-        "AI Engine",
-        options=["☁️  Cloud (Groq)", "💻  Local (Ollama)"],
-        key="llm_mode_radio",
-        label_visibility="collapsed",
-    )
-    st.session_state.llm_mode = (
-        "cloud" if "Cloud" in st.session_state.llm_mode_radio else "local"
-    )
-    _active_model_name = (
-        "llama-3.3-70b-versatile (Groq)" if st.session_state.llm_mode == "cloud"
-        else "BioMistral-7B (Ollama)"
-    )
-    st.markdown(
-        f"<div style='font-size:.72rem;color:#90C4E0;margin:.1rem 0 .7rem;'>"
-        f"Active: {_active_model_name}</div>",
-        unsafe_allow_html=True,
-    )
-    if st.session_state.llm_mode == "cloud" and not st.session_state.get("groq_api_key", ""):
-        st.markdown(
-            "<div style='font-size:.7rem;color:#EF9A9A;background:rgba(239,83,80,.15);"
-            "border-radius:6px;padding:4px 8px;margin-bottom:.4rem;'>"
-            "⚠️ GROQ_API_KEY not set</div>",
-            unsafe_allow_html=True,
-        )
-    st.markdown(
-        "<hr style='border-color:rgba(255,255,255,0.15);margin:.3rem 0 .8rem;'>",
-        unsafe_allow_html=True,
-    )
-
     st.caption(f"v1.0.0  ·  {datetime.now().strftime('%d %b %Y')}")
 
 
 
-# --- GLOBAL LEFT DRAWER (injected via window.parent) ---
-_st_components.html('<script>\n(function(){\n  var p = window.parent;\n  var d = p.document;\n  if (!d.getElementById(\'_pd_css\')) {\n    var s = d.createElement(\'style\');\n    s.id = \'_pd_css\';\n    s.textContent = [\n      \'#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}\',\n      \'#_pd_panel{position:fixed;top:0;left:0;height:100vh;width:285px;background:#fff;\',\n        \'box-shadow:4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:1.5rem 1.3rem 2rem;\',\n        \'transform:translateX(-100%);transition:transform .26s cubic-bezier(.4,0,.2,1);\',\n        \'overflow-y:auto;font-family:sans-serif;}\',\n      \'#_pd_panel.open{transform:translateX(0);}\',\n      \'#_pd_tab{position:fixed;top:50vh;left:0;transform:translateY(-50%);\',\n        \'background:#0B3C5D;color:#fff;border:none;cursor:pointer;\',\n        \'padding:.85rem .45rem;border-radius:0 8px 8px 0;\',\n        \'font-size:1.2rem;z-index:9997;box-shadow:2px 0 10px rgba(11,60,93,.22);\',\n        \'transition:background .15s;}\',\n      \'#_pd_tab:hover{background:#1A6B8A;}\',\n      \'.pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;\',\n        \'background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;\',\n        \'padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}\',\n      \'.pd-card:hover{background:#E3F2FD;}\',\n      \'.pd-icon{font-size:1.3rem;flex-shrink:0;}\',\n      \'.pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}\',\n      \'.pd-sub{font-size:.72rem;color:#6B8CAE;}\'\n    ].join(\'\');\n    d.head.appendChild(s);\n  }\n  p._pdOpen  = function(){ d.getElementById(\'_pd_panel\').classList.add(\'open\');    d.getElementById(\'_pd_bd\').style.display=\'block\';  };\n  p._pdClose = function(){ d.getElementById(\'_pd_panel\').classList.remove(\'open\'); d.getElementById(\'_pd_bd\').style.display=\'none\';   };\n  [\'_pd_bd\',\'_pd_panel\',\'_pd_tab\'].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n  var bd = d.createElement(\'div\');\n  bd.id = \'_pd_bd\';\n  bd.setAttribute(\'onclick\',\'_pdClose()\');\n  d.body.appendChild(bd);\n  var feats = [\n    [\'\\uD83C\\uDFE0\',\'Dashboard\',\'Metrics &amp; activity feed\'],\n    [\'\\uD83D\\uDCCB\',\'Prescription Scanner\',\'OCR + drug extraction\'],\n    [\'\\uD83D\\uDCAC\',\'Drug Interaction Chat\',\'AI clinical pharmacist\'],\n    [\'\\uD83D\\uDD0D\',\'Drug Lookup\',\'Search drug profiles\']\n  ];\n  var panel = d.createElement(\'div\');\n  panel.id = \'_pd_panel\';\n  panel.innerHTML =\n    \'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.9rem;">\' +\n      \'<b style="color:#0B3C5D;font-size:1.02rem;">\\uD83E\\uDDED All Features</b>\' +\n      \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:#6B8CAE;padding:0;">&times;</button>\' +\n    \'</div>\' +\n    \'<hr style="border:none;border-top:1px solid #e0eef8;margin-bottom:1rem;">\' +\n    feats.map(function(f){\n      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n        \'</a>\';\n    }).join(\'\');\n  d.body.appendChild(panel);\n  var tab = d.createElement(\'button\');\n  tab.id = \'_pd_tab\';\n  tab.title = \'All Features\';\n  tab.innerHTML = \'&#9776;\';\n  tab.setAttribute(\'onclick\',\'_pdOpen()\');\n  d.body.appendChild(tab);\n})();\n</script>', height=0, scrolling=False)
+# --- GLOBAL SETTINGS DRAWER (right-side, injected via window.parent) ---
+_llm_m = st.session_state.get("llm_mode", "local")
+_drawer_html = (
+    '<script>\n(function(){\n'
+    '  var M = "' + _llm_m + '";\n'
+    '  var p = window.parent;\n'
+    '  var d = p.document;\n'
+    '  if (!d.getElementById("_pd_css")) {\n'
+    '    var s = d.createElement("style");\n'
+    '    s.id = "_pd_css";\n'
+    '    s.textContent = [\n'
+    '      "#_pd_bd{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;display:none;}",\n'
+    '      "#_pd_panel{position:fixed;top:0;right:0;height:100vh;width:295px;background:#fff;",\n'
+    '        "box-shadow:-4px 0 28px rgba(11,60,93,.18);z-index:9999;padding:0;",\n'
+    '        "transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);",\n'
+    '        "overflow-y:auto;font-family:sans-serif;}",\n'
+    '      "#_pd_panel.open{transform:translateX(0);}",\n'
+    '      "#_pd_tab{position:fixed;top:50vh;right:0;transform:translateY(-50%);",\n'
+    '        "background:#0B3C5D;color:#fff;border:none;cursor:pointer;",\n'
+    '        "padding:.85rem .45rem;border-radius:8px 0 0 8px;",\n'
+    '        "font-size:1.2rem;z-index:9997;box-shadow:-2px 0 10px rgba(11,60,93,.22);",\n'
+    '        "transition:background .15s;}",\n'
+    '      "#_pd_tab:hover{background:#1A6B8A;}",\n'
+    '      ".pd-hdr{background:#0B3C5D;color:#fff;padding:1.1rem 1.3rem .9rem;display:flex;justify-content:space-between;align-items:center;}",\n'
+    '      ".pd-hdr-title{font-size:1.05rem;font-weight:700;letter-spacing:.01em;}",\n'
+    '      ".pd-body{padding:1rem 1.2rem 2rem;}",\n'
+    '      ".pd-sec{font-size:.7rem;font-weight:700;letter-spacing:.08em;color:#6B8CAE;text-transform:uppercase;margin:1rem 0 .45rem;}",\n'
+    '      ".pd-card{display:flex;align-items:center;gap:.75rem;text-decoration:none;color:inherit;",\n'
+    '        "background:#F8FBFD;border:1px solid #e0eef8;border-radius:10px;",\n'
+    '        "padding:.7rem .9rem;margin-bottom:.4rem;transition:background .15s;}",\n'
+    '      ".pd-card:hover{background:#E3F2FD;}",\n'
+    '      ".pd-icon{font-size:1.3rem;flex-shrink:0;}",\n'
+    '      ".pd-title{font-weight:600;font-size:.88rem;color:#0B3C5D;display:block;}",\n'
+    '      ".pd-sub{font-size:.72rem;color:#6B8CAE;}",\n'
+    '      ".pd-mrow{display:flex;gap:.5rem;margin:.1rem 0 .6rem;}",\n'
+    '      ".pd-mbtn{flex:1;padding:.55rem .4rem;border:2px solid #CBD5E0;border-radius:8px;",\n'
+    '        "background:#F8FBFD;color:#0B3C5D;font-size:.82rem;font-weight:600;cursor:pointer;",\n'
+    '        "transition:all .15s;text-align:center;}",\n'
+    '      ".pd-mbtn:hover{background:#E3F2FD;border-color:#1A6B8A;}",\n'
+    '      ".pd-mbtn.on{background:#1A6B8A;border-color:#1A6B8A;color:#fff;}",\n'
+    '      ".pd-active{font-size:.72rem;color:#6B8CAE;margin-top:.25rem;text-align:center;}"\n'
+    '    ].join("");\n'
+    '    d.head.appendChild(s);\n'
+    '  }\n'
+    '  p._pdOpen  = function(){ d.getElementById("_pd_panel").classList.add("open");    d.getElementById("_pd_bd").style.display="block"; };\n'
+    '  p._pdClose = function(){ d.getElementById("_pd_panel").classList.remove("open"); d.getElementById("_pd_bd").style.display="none"; };\n'
+    '  p._pdM = function(m){\n'
+    '    ["_pdM_cloud","_pdM_local"].forEach(function(id){ var b=d.getElementById(id); if(b) b.className="pd-mbtn"; });\n'
+    '    var active = d.getElementById("_pdM_"+m);\n'
+    '    if(active) active.className="pd-mbtn on";\n'
+    '    var lbl = d.getElementById("_pdM_lbl");\n'
+    '    if(lbl) lbl.textContent = (m==="cloud" ? "\u2601\ufe0f llama-3.3-70b (Groq)" : "\U0001f4bb BioMistral-7B (Ollama)");\n'
+    '    window.parent.location.href = "?model=" + m;\n'
+    '  };\n'
+    '  ["_pd_bd","_pd_panel","_pd_tab"].forEach(function(id){ var e=d.getElementById(id); if(e) e.remove(); });\n'
+    '  var bd = d.createElement("div");\n'
+    '  bd.id = "_pd_bd";\n'
+    '  bd.setAttribute("onclick","_pdClose()");\n'
+    '  d.body.appendChild(bd);\n'
+    '  var feats = [\n'
+    '    ["\uD83C\uDFE0","Dashboard","Metrics &amp; activity feed"],\n'
+    '    ["\uD83D\uDCCB","Prescription Scanner","OCR + drug extraction"],\n'
+    '    ["\uD83D\uDCAC","Drug Interaction Chat","AI clinical pharmacist"],\n'
+    '    ["\uD83D\uDD0D","Drug Lookup","Search drug profiles"]\n'
+    '  ];\n'
+    '  var panel = d.createElement("div");\n'
+    '  panel.id = "_pd_panel";\n'
+    '  var isCloud = (M === "cloud");\n'
+    '  var cloudOn = isCloud ? " on" : "";\n'
+    '  var localOn = isCloud ? "" : " on";\n'
+    '  var activeLbl = isCloud ? "\u2601\ufe0f llama-3.3-70b (Groq)" : "\U0001f4bb BioMistral-7B (Ollama)";\n'
+    + '  panel.innerHTML =\n'
+    + '    \'<div class="pd-hdr"><span class="pd-hdr-title">\u2699\ufe0f Settings</span>\' +\n'
+    + '    \'<button onclick="_pdClose()" style="background:none;border:none;cursor:pointer;font-size:1.4rem;color:rgba(255,255,255,.7);padding:0;">&times;</button></div>\' +\n'
+    + '    \'<div class="pd-body">\' +\n'
+    + '    \'<div class="pd-sec">PAGES</div>\' +\n'
+    + '    feats.map(function(f){\n'
+    + '      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n'
+    + '        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n'
+    + '        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n'
+    + '        \'</a>\';\n'
+    + '    }).join("") +\n'
+    + '    \'<div class="pd-sec" style="margin-top:1.2rem;">AI ENGINE</div>\' +\n'
+    + '    \'<div class="pd-mrow">\' +\n'
+    + '    \'<button id="_pdM_cloud" class="pd-mbtn\' + cloudOn + \'" onclick="_pdM(\\\'cloud\\\')">\u2601\ufe0f Cloud (Groq)</button>\' +\n'
+    + '    \'<button id="_pdM_local" class="pd-mbtn\' + localOn + \'" onclick="_pdM(\\\'local\\\')">\U0001f4bb Local (Ollama)</button>\' +\n'
+    + '    \'</div>\' +\n'
+    + '    \'<div id="_pdM_lbl" class="pd-active">\' + activeLbl + \'</div>\' +\n'
+    + '    \'</div>\';\n'
+    + '  d.body.appendChild(panel);\n'
+    + '  var tab = d.createElement("button");\n'
+    + '  tab.id = "_pd_tab";\n'
+    + '  tab.title = "Settings";\n'
+    + '  tab.innerHTML = "&#9881;&#65039;";\n'
+    + '  tab.setAttribute("onclick","_pdOpen()");\n'
+    + '  d.body.appendChild(tab);\n'
+    + '})();\n'
+    + '</script>'
+)
+_st_components.html(_drawer_html, height=0, scrolling=False)
 
 
 # --- PAGE: DASHBOARD ---
