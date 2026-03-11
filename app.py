@@ -1298,11 +1298,22 @@ elif active_page == "Drug Interaction Chat":
                 )
             _q = st.session_state.pending_input
             st.session_state.pending_input = None
+            # Build OCR context string if a prescription was scanned
+            _ocr = st.session_state.get("ocr_result") or {}
+            _ocr_ctx = ""
+            if _ocr.get("medications"):
+                _meds = _ocr.get("medications", [])
+                _ocr_ctx = "Scanned prescription medications: " + ", ".join(_meds) + "."
+                _raw = _ocr.get("raw_json") or _ocr.get("raw_js")
+                if isinstance(_raw, dict):
+                    import json as _json
+                    _ocr_ctx += "\nFull OCR data: " + _json.dumps(_raw, ensure_ascii=False)[:1200]
             llm_resp = generate_response(
                 _q,
                 st.session_state.chat_history,
                 mode=st.session_state.get("llm_mode", "local"),
                 groq_api_key=st.session_state.get("groq_api_key", ""),
+                ocr_context=_ocr_ctx,
             )
             if llm_resp:
                 st.session_state.chat_history.append(

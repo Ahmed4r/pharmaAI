@@ -708,6 +708,7 @@ def generate_response(
     chat_history: list | None = None,
     mode: str = "local",
     groq_api_key: str = "",
+    ocr_context: str = "",
 ) -> str:
     """
     Unified LLM router for the Drug Interaction Chat page.
@@ -787,7 +788,10 @@ def generate_response(
             pass
 
         # Build system prompt: full clinical framework + RAG
-        _sys_gr = _SYSTEM_CLINICAL + _rag_block_gr
+        _sys_gr = _SYSTEM_CLINICAL + (("\n\nACTIVE PRESCRIPTION CONTEXT (from OCR scan):\n" + ocr_context) if ocr_context else "") + _rag_block_gr
         return _chat_groq(_sys_gr, _msg_gr, groq_api_key)
     else:
-        return query_ollama_llm(user_message, chat_history or [])
+        _local_msg = user_message
+        if ocr_context:
+            _local_msg = "ACTIVE PRESCRIPTION CONTEXT (from OCR scan):\n" + ocr_context + "\n\nQuestion: " + user_message
+        return query_ollama_llm(_local_msg, chat_history or [])
