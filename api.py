@@ -169,7 +169,7 @@ async def query_endpoint(req: QueryRequest):
     summary="Prescription OCR -- Gemini Vision + Groq safety analysis",
     dependencies=[Depends(_check_api_key)],
 )
-async def ocr_endpoint(req: OcrRequest):
+async def ocr_endpoint(req: OcrRequest, x_gemini_key: str = Header(default="", alias="X-Gemini-Key")):
     """Accepts image URL or base64 and returns OCR + safety analysis."""
     try:
         if req.image_url:
@@ -183,7 +183,7 @@ async def ocr_endpoint(req: OcrRequest):
             raise HTTPException(status_code=422, detail="Provide image_url or image_base64.")
 
         from ocr import process_prescription_ocr, analyze_prescription_safety
-        ocr_raw = process_prescription_ocr(img_bytes, filename="prescription.jpg")
+        ocr_raw = process_prescription_ocr(img_bytes, filename="prescription.jpg", gemini_api_key=x_gemini_key)
         safety = analyze_prescription_safety(
             parsed_meds=ocr_raw.get("parsed_meds", []),
             patient=ocr_raw.get("patient", ""),
@@ -215,12 +215,13 @@ async def ocr_upload_endpoint(
     file: UploadFile = File(...),
     patient_weight_kg: float = 0.0,
     groq_api_key: Optional[str] = Header(default=None, alias="X-Groq-Key"),
+    x_gemini_key: str = Header(default="", alias="X-Gemini-Key"),
 ):
     """Multipart upload variant of /ocr for when image URL is not available."""
     try:
         img_bytes = await file.read()
         from ocr import process_prescription_ocr, analyze_prescription_safety
-        ocr_raw = process_prescription_ocr(img_bytes, filename=file.filename or "upload.jpg")
+        ocr_raw = process_prescription_ocr(img_bytes, filename=file.filename or "upload.jpg", gemini_api_key=x_gemini_key)
         safety = analyze_prescription_safety(
             parsed_meds=ocr_raw.get("parsed_meds", []),
             patient=ocr_raw.get("patient", ""),

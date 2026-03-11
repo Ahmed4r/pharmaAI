@@ -58,7 +58,7 @@ def preprocess_prescription_image(image_bytes: bytes) -> bytes:
 
 
 
-def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png") -> dict:
+def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.png", gemini_api_key: str = "") -> dict:
     """OCR via Google Gemini 1.5 Flash  native JSON mode, Egyptian prescription specialist."""
     import json
     import os as _os
@@ -76,7 +76,8 @@ def process_prescription_ocr(image_bytes: bytes, filename: str = "prescription.p
 
     try:
         api_key = (
-            st.session_state.get("gemini_api_key", "").strip()
+            gemini_api_key.strip()
+            or st.session_state.get("gemini_api_key", "").strip()
             or _os.environ.get("GEMINI_API_KEY", "")
             or _os.environ.get("GOOGLE_API_KEY", "")
         )
