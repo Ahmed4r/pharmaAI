@@ -298,19 +298,16 @@ st.markdown(CLINICAL_CSS, unsafe_allow_html=True)
 
 
 
-# Handle ?nav= from left-drawer links
+# Handle ?nav= and ?model= from drawer links -- read ALL params first, then clear
 try:
     _qnav = st.query_params.get("nav")
+    _qmodel = st.query_params.get("model")
     _QP_PAGES = ["Dashboard", "Prescription Scanner", "Drug Interaction Chat", "Drug Lookup"]
     if _qnav and _qnav in _QP_PAGES:
         st.session_state["nav_page"] = _qnav
-        st.query_params.clear()
-    _qmodel = st.query_params.get("model")
     if _qmodel in ("cloud", "local"):
         st.session_state["llm_mode"] = _qmodel
-        st.session_state["llm_mode_radio"] = (
-            "☁️  Cloud (Groq)" if _qmodel == "cloud" else "💻  Local (Ollama)"
-        )
+    if _qnav or _qmodel:
         st.query_params.clear()
 except Exception:
     pass
@@ -465,7 +462,7 @@ _drawer_html = (
     + '    \'<div class="pd-body">\' +\n'
     + '    \'<div class="pd-sec">PAGES</div>\' +\n'
     + '    feats.map(function(f){\n'
-    + '      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'" class="pd-card">\' +\n'
+    + '      return \'<a href="?nav=\'+encodeURIComponent(f[1])+\'&model=\'+M+\'" class="pd-card">\' +\n'
     + '        \'<span class="pd-icon">\'+f[0]+\'</span>\' +\n'
     + '        \'<span><span class="pd-title">\'+f[1]+\'</span><span class="pd-sub">\'+f[2]+\'</span></span>\' +\n'
     + '        \'</a>\';\n'
