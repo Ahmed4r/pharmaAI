@@ -900,7 +900,7 @@ elif active_page == "Prescription Scanner":
                     "<span style='background:#E3F0FF;color:#1A6B8A;"
                     "padding:2px 10px;border-radius:20px;"
                     "font-size:.72rem;font-weight:700;letter-spacing:.02em;'>"
-                    "Powered by Tesseract.js</span></div>",
+                    "Powered by ai</span></div>",
                     unsafe_allow_html=True,
                 )
                 if st.button(
