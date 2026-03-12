@@ -50,7 +50,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "https://ahmedrhegazy-pharma-api.hf.space/ocr",
+        "url": "http://127.0.0.1:8000/ocr",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.body) }}",
@@ -85,7 +85,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "https://ahmedrhegazy-pharma-api.hf.space/query",
+        "url": "http://127.0.0.1:8000/query",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.body) }}",
@@ -321,7 +321,7 @@
         ],
         [
           {
-            "node": "Webhook Response",
+            "node": "Telegram - Standard Alert",
             "type": "main",
             "index": 0
           }

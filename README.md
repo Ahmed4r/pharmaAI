@@ -213,7 +213,7 @@ n8n opens at `http://localhost:5678`.
 ### Test the workflow
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:5678/webhook/pharma-query" `
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5678/webhook/pharma-query" `
   -ContentType "application/json" `
   -Body '{"query": "warfarin ibuprofen"}'
 ```
