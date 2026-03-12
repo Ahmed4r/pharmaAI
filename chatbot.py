@@ -1,4 +1,4 @@
-"""chatbot.py  standalone chatbot module for PharmaAI."""
+﻿"""chatbot.py  standalone chatbot module for PharmaAI."""
 from __future__ import annotations
 import re
 import os
@@ -698,7 +698,7 @@ def query_ollama_llm(user_message: str, chat_history: list) -> str:
 
 
 #  Groq Cloud path 
-_GROQ_CLOUD_MODEL = "llama-3.3-70b-versatile"
+_GROQ_CLOUD_MODEL = os.environ.get("PHARMA_GROQ_MODEL", "llama-3.1-8b-instant")
 
 
 def _chat_groq(system_prompt: str, user_message: str, api_key: str) -> str:

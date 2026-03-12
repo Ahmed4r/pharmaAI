@@ -197,6 +197,24 @@
         "options": {}
       },
       "notes": "Returns the StructuredClinicalResponse JSON back to the mobile app."
+    },
+    {
+      "id": "11",
+      "name": "Telegram - Quick Ack",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        480,
+        480
+      ],
+      "parameters": {
+        "chatId": "945460800",
+        "text": "={{ '⚡ Query received: ' + (.body.query || .query || 'unknown') + chr(10) + 'Analysing now...' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": true
+        }
+      }
     }
   ],
   "connections": {
@@ -205,6 +223,11 @@
         [
           {
             "node": "Route - Has Image?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram - Quick Ack",
             "type": "main",
             "index": 0
           }
